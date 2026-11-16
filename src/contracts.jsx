@@ -7,6 +7,7 @@ import {
   moveInDeadline, nowInVietnam, plusDays, renewalOpen, shortDate, updateContract,
 } from './demo'
 import { Empty, Field, Modal, Notice, Status, useDemo } from './shared'
+import { AppointmentMiniMap } from './MapView'
 
 export function ContractStatus({ contract }) {
   if (contract.status === 'cancelled') return <Status tone="amber">Đã hủy (Mất cọc)</Status>
@@ -68,6 +69,11 @@ export function ContractDetail({ role }) {
   const overdueNoShow = canCancelNoShow(contract)
 
   async function act(action, values, message) {
+  const tenant = identity(contract.tenantId)
+  const owner = identity(contract.ownerId)
+  const contractUnit = db.apartments.find((item) => item.id === contract.apartmentId)
+  const contractBuilding = db.buildings.find((item) => item.id === contractUnit?.buildingId || item.name === contract.propertyName)
+  function act(action, values, message) {
     try {
       if (apiConnected) {
         if (action === 'schedule') await backendApi.scheduleContract(id, values.appointment)
@@ -160,6 +166,7 @@ export function ContractDetail({ role }) {
       </article>
       <div className="stack detail-side">
         <article className="panel"><h2><CalendarDays size={20} /> Lịch ký hợp đồng</h2><p className="appointment-value">{appointmentText(contract.appointment)}</p><p className="place"><MapPin size={17} />{contract.location}</p>
+          <AppointmentMiniMap contract={contract} building={contractBuilding} />
           {role === 'tenant' && waiting && <button className="button outline wide" onClick={() => open('schedule')}>{contract.appointment ? 'Đổi ngày giờ ký' : 'Đặt lịch ký'}</button>}
         </article>
         <article className="panel"><h2><ShieldCheck size={20} /> Xác nhận ký & thu tiền ban đầu</h2>

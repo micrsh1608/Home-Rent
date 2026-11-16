@@ -109,15 +109,17 @@ export function calculateLeaseBreakdown(startDate, endDate, monthlyRent) {
 
 const building = (id, ownerId, name, district, address) => ({
   id, ownerId, name, district, address,
+const building = (id, ownerId, name, district, address, lat, lng) => ({
+  id, ownerId, name, district, address, lat, lng,
   location: `Sảnh lễ tân ${name}, ${address}`,
   electricRate: 3500, waterRate: 20000,
 })
 
 const buildings = [
-  building('b1', 'o1', 'The River Thảo Điền', 'TP. Thủ Đức', '28 Nguyễn Văn Hưởng, TP. Hồ Chí Minh'),
-  building('b2', 'o2', 'Lumière Residence', 'Quận 7', '88 Nguyễn Đức Cảnh, TP. Hồ Chí Minh'),
-  building('b3', 'o1', 'Urban Nest', 'Bình Thạnh', '55 Nguyễn Hữu Cảnh, TP. Hồ Chí Minh'),
-  building('b4', 'o2', 'The Greenhouse', 'Quận 3', '46 Võ Văn Tần, TP. Hồ Chí Minh'),
+  building('b1', 'o1', 'The River Thảo Điền', 'TP. Thủ Đức', '28 Nguyễn Văn Hưởng, TP. Hồ Chí Minh', 10.8068, 106.7318),
+  building('b2', 'o2', 'Lumière Residence', 'Quận 7', '88 Nguyễn Đức Cảnh, TP. Hồ Chí Minh', 10.7256, 106.7118),
+  building('b3', 'o1', 'Urban Nest', 'Bình Thạnh', '55 Nguyễn Hữu Cảnh, TP. Hồ Chí Minh', 10.7932, 106.7186),
+  building('b4', 'o2', 'The Greenhouse', 'Quận 3', '46 Võ Văn Tần, TP. Hồ Chí Minh', 10.7781, 106.6912),
 ]
 
 const apartment = (id, buildingId, room, title, price, area, beds, baths, image, published = true) => ({

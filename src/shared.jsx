@@ -156,8 +156,63 @@ export function ScrollToTop() {
 }
 
 export function Logo() {
-  return <Link to="/" className="logo" aria-label="An Cư – trang chủ">
-    <span className="logo-mark"><House size={21} strokeWidth={1.65} /></span><span>An Cư<span className="logo-dot">.</span></span>
+  return <Link to="/" className="logo" aria-label="An Cư – trang chủ" title="An Cư">
+    <span className="logo-mark" aria-hidden="true">
+      <svg className="logo-svg" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="ancu-bg" x1="4" y1="2" x2="40" y2="42" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#2d5647" />
+            <stop offset="100%" stopColor="#193329" />
+          </linearGradient>
+          <linearGradient id="ancu-gold" x1="14" y1="14" x2="30" y2="36" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#f0d5a8" />
+            <stop offset="100%" stopColor="#b58652" />
+          </linearGradient>
+        </defs>
+        {/* Outer Sanctuary Badge */}
+        <rect x="1.5" y="1.5" width="41" height="41" rx="12.5" fill="url(#ancu-bg)" stroke="#ead3a9" strokeOpacity="0.28" strokeWidth="1.2" />
+        {/* Subtle Architectural Halo */}
+        <circle cx="22" cy="21" r="14.5" stroke="#ead3a9" strokeOpacity="0.12" strokeWidth="1" />
+        {/* Left High-Rise Wing & Sanctuary Roof Apex (Letter A silhouette - "Cư") */}
+        <path
+          d="M9.5 33.5V18.2L22 7.5L26.2 11.1V15.4L22 11.8L14.2 18.5V33.5H9.5Z"
+          fill="#fffef7"
+        />
+        {/* Right Stepped Urban Tower Wing (3D depth & modern apartment skyline) */}
+        <path
+          d="M22 7.5L34.5 18.2V33.5H29.8V18.5L22 11.8V7.5Z"
+          fill="#dce7dc"
+        />
+        {/* Secondary Modern Tower Accent */}
+        <path
+          d="M31.2 13.2H34.5V33.5H31.2V13.2Z"
+          fill="#fffef7"
+          fillOpacity="0.88"
+        />
+        {/* Sanctuary Archway Portal (Warmth & Peace - "An") */}
+        <path
+          d="M16.2 33.5V23.2C16.2 20.05 18.8 17.5 22 17.5C25.2 17.5 27.8 20.05 27.8 23.2V33.5"
+          stroke="url(#ancu-gold)"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
+        {/* Inner Arch Warm Glow */}
+        <path
+          d="M18.3 33.5V23.4C18.3 21.35 19.95 19.7 22 19.7C24.05 19.7 25.7 21.35 25.7 23.4V33.5H18.3Z"
+          fill="url(#ancu-gold)"
+          fillOpacity="0.18"
+        />
+        {/* Warm Hearth / Lit Window Orb at Heart of the Arch */}
+        <circle cx="22" cy="23.6" r="2.55" fill="url(#ancu-gold)" />
+        {/* Grounded Architectural Plinth ("An cư lạc nghiệp") */}
+        <path
+          d="M7.5 33.8H36.5"
+          stroke="url(#ancu-gold)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    </span>
   </Link>
 }
 
