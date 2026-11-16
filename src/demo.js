@@ -1,14 +1,110 @@
 export const people = [
-  { id: 't1', name: 'Nguyễn Minh Anh', role: 'tenant' },
-  { id: 't2', name: 'Lê Hoàng Nam', role: 'tenant' },
-  { id: 'o1', name: 'Trần Thu Hà', role: 'owner' },
-  { id: 'o2', name: 'Phạm Gia Bảo', role: 'owner' },
+  { id: 't1', name: 'Nguyễn Minh Anh', role: 'tenant', email: 'minhanh@ancu.vn' },
+  { id: 't2', name: 'Lê Hoàng Nam', role: 'tenant', email: 'hoangnam@ancu.vn' },
+  { id: 'o1', name: 'Trần Thu Hà', role: 'owner', email: 'thuha@ancu.vn' },
+  { id: 'o2', name: 'Phạm Gia Bảo', role: 'owner', email: 'giabao@ancu.vn' },
 ]
 
 export function dateAt(offset = 0) {
   const date = new Date()
   date.setDate(date.getDate() + offset)
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(date)
+}
+
+export const plusDays = (iso, days) => {
+  const date = new Date(`${iso}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+export const daysBetweenInclusive = (startIso, endIso) => {
+  const start = new Date(`${startIso}T12:00:00Z`)
+  const end = new Date(`${endIso}T12:00:00Z`)
+  return Math.round((end - start) / 86400000) + 1
+}
+
+/**
+ * Quyết định 2:
+ * 1 tháng là tùy theo tháng có 30 hay 31 ngày;
+ * riêng đối với tháng 2 vẫn tính theo 30 ngày kể từ ngày bắt đầu trên hợp đồng.
+ */
+export function monthBasisDays(monthNumber) {
+  const m = Number(monthNumber)
+  if ([1, 3, 5, 7, 8, 10, 12].includes(m)) return 31
+  if ([4, 6, 9, 11].includes(m)) return 30
+  if (m === 2) return 30
+  throw new Error(`Tháng không hợp lệ: ${monthNumber}`)
+}
+
+export function calculateEndDateForTerm(startDate, unit = 'MONTH', value = 1) {
+  if (!startDate || Number(value) <= 0) throw new Error('Kiểm tra lại ngày bắt đầu và thời hạn thuê.')
+  const normalizedUnit = String(unit || 'MONTH').toUpperCase()
+  const totalMonths = normalizedUnit === 'YEAR' ? Number(value) * 12 : Number(value)
+  let cursor = startDate
+  for (let i = 0; i < totalMonths; i += 1) {
+    const month = Number(cursor.slice(5, 7))
+    cursor = plusDays(cursor, monthBasisDays(month))
+  }
+  return plusDays(cursor, -1)
+}
+
+export function calculateLeaseBreakdown(startDate, endDate, monthlyRent) {
+  if (!startDate || !endDate || endDate < startDate || !Number.isFinite(monthlyRent) || monthlyRent <= 0) {
+    return {
+      startDate, endDate, monthlyRent: monthlyRent || 0,
+      totalPeriods: 0, firstPeriodRent: 0, lastPeriodRent: 0, totalContractRent: 0, periods: [],
+    }
+  }
+  const periods = []
+  let cursor = startDate
+  let index = 1
+  while (cursor <= endDate) {
+    const month = Number(cursor.slice(5, 7))
+    const basisDays = monthBasisDays(month)
+    const fullPeriodEnd = plusDays(cursor, basisDays - 1)
+    const billingMonth = cursor.slice(0, 7)
+    if (endDate >= fullPeriodEnd) {
+      periods.push({
+        periodIndex: index,
+        billingMonth,
+        periodStart: cursor,
+        periodEnd: fullPeriodEnd,
+        daysInPeriod: basisDays,
+        monthBasisDays: basisDays,
+        fullMonth: true,
+        rentAmount: monthlyRent,
+      })
+      cursor = plusDays(fullPeriodEnd, 1)
+    } else {
+      const actualDays = daysBetweenInclusive(cursor, endDate)
+      const proratedRent = Math.round((monthlyRent * actualDays) / basisDays)
+      periods.push({
+        periodIndex: index,
+        billingMonth,
+        periodStart: cursor,
+        periodEnd: endDate,
+        daysInPeriod: actualDays,
+        monthBasisDays: basisDays,
+        fullMonth: actualDays === basisDays,
+        rentAmount: proratedRent,
+      })
+      break
+    }
+    index += 1
+  }
+  const firstPeriodRent = periods[0]?.rentAmount ?? 0
+  const lastPeriodRent = periods.at(-1)?.rentAmount ?? 0
+  const totalContractRent = periods.reduce((sum, p) => sum + p.rentAmount, 0)
+  return {
+    startDate,
+    endDate,
+    monthlyRent,
+    totalPeriods: periods.length,
+    firstPeriodRent,
+    lastPeriodRent,
+    totalContractRent,
+    periods,
+  }
 }
 
 const building = (id, ownerId, name, district, address) => ({
@@ -39,7 +135,7 @@ const apartments = [
   apartment('a6', 'b2', 'B-09.03', 'Căn hộ Lumière Park', 10400000, 52, 2, 1, 'urban', false),
 ]
 
-export function makeContract(db, apartmentId, tenantId, startDate, endDate, rent, renewalOf = null) {
+export function makeContract(db, apartmentId, tenantId, startDate, endDate, rent, renewalOf = null, extra = {}) {
   const unit = db.apartments.find((item) => item.id === apartmentId)
   const property = db.buildings.find((item) => item.id === unit.buildingId)
   return {
@@ -48,6 +144,11 @@ export function makeContract(db, apartmentId, tenantId, startDate, endDate, rent
     startDate, endDate, rent, deposit: rent, location: property.location,
     electricRate: property.electricRate, waterRate: property.waterRate,
     status: 'awaiting', payment: 'unpaid', appointment: '', signedAt: null,
+    signedConfirmedBy: null, paymentConfirmedBy: null,
+    moveInDeadline: plusDays(startDate, 3),
+    depositForfeited: false, cancelledAt: null, cancellationReason: '',
+    leaseTermUnit: extra.leaseTermUnit ?? 'CUSTOM',
+    leaseTermValue: extra.leaseTermValue ?? 6,
     renewal: null, actualMoveIn: '', actualMoveOut: '',
   }
 }
@@ -55,8 +156,18 @@ export function makeContract(db, apartmentId, tenantId, startDate, endDate, rent
 function seed() {
   const db = { buildings, apartments, contracts: [], invoices: [], favorites: {} }
   db.contracts = [
-    { ...makeContract(db, 'a5', 't1', dateAt(-160), dateAt(8), 11200000), id: 'HD-1001', status: 'signed', payment: 'paid', signedAt: dateAt(-161) },
-    { ...makeContract(db, 'a6', 't2', dateAt(-190), dateAt(-9), 10400000), id: 'HD-1002', status: 'signed', payment: 'paid', signedAt: dateAt(-192), renewal: 'declined' },
+    {
+      ...makeContract(db, 'a5', 't1', dateAt(-160), dateAt(8), 11200000),
+      id: 'HD-1001', status: 'signed', payment: 'paid',
+      signedAt: dateAt(-161), signedConfirmedBy: 'o1', paymentConfirmedBy: 'o1',
+      actualMoveIn: dateAt(-160),
+    },
+    {
+      ...makeContract(db, 'a6', 't2', dateAt(-190), dateAt(-9), 10400000),
+      id: 'HD-1002', status: 'signed', payment: 'paid',
+      signedAt: dateAt(-192), signedConfirmedBy: 'o2', paymentConfirmedBy: 'o2',
+      actualMoveIn: dateAt(-190), renewal: 'declined',
+    },
   ]
   db.invoices = [{
     id: 'HĐ-1001', contractId: 'HD-1001', month: dateAt(-31).slice(0, 7), status: 'unpaid',
@@ -66,7 +177,7 @@ function seed() {
   return db
 }
 
-export const storageKey = 'an-cu-demo-v1'
+export const storageKey = 'an-cu-demo-v2'
 export function loadDemo() {
   try {
     const saved = globalThis.localStorage?.getItem(storageKey)
@@ -77,21 +188,19 @@ export function loadDemo() {
   return seed()
 }
 
-export const money = (amount) => `${new Intl.NumberFormat('vi-VN').format(amount)} ₫`
-export const shortDate = (value) => value ? value.slice(0, 10).split('-').reverse().join('/') : '—'
-export const appointmentText = (value) => value ? `${value.slice(11, 16)}, ${shortDate(value)}` : 'Chưa đặt lịch'
+export const money = (amount) => `${new Intl.NumberFormat('vi-VN').format(amount ?? 0)} ₫`
+export const shortDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('/') : '—'
+export const appointmentText = (value) => value ? `${String(value).slice(11, 16)}, ${shortDate(value)}` : 'Chưa đặt lịch'
 export const nowInVietnam = () => new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Ho_Chi_Minh', dateStyle: 'short', timeStyle: 'short',
 }).format(new Date()).replace(' ', 'T')
-export const plusDays = (iso, days) => {
-  const date = new Date(`${iso}T12:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
-}
 export const identity = (id) => people.find((person) => person.id === id)
-export const contractCode = (contract) => contract.id.startsWith('HD-') ? contract.id : `HD-${contract.id.slice(0, 8).toUpperCase()}`
+export const contractCode = (contract) => contract.code || (contract.id.startsWith('HD-') ? contract.id : `HD-${contract.id.slice(0, 8).toUpperCase()}`)
 export const expired = (contract, today = dateAt()) => contract.status === 'signed' && contract.endDate < today
 export const renewalOpen = (contract, today = dateAt()) => contract.status === 'signed' && contract.endDate <= plusDays(today, 30)
+export const moveInDeadline = (contract) => contract.moveInDeadline || plusDays(contract.startDate, 3)
+export const canCancelNoShow = (contract, today = dateAt()) =>
+  contract.status === 'signed' && !contract.actualMoveIn && today > moveInDeadline(contract)
 export const overlaps = (a, b) => a.startDate <= b.endDate && b.startDate <= a.endDate
 
 export function unitStatus(db, unit, today = dateAt()) {
@@ -118,29 +227,63 @@ export function updateContract(db, actor, id, action, payload = {}, today = date
       changes = { appointment: payload.appointment }
       break
     case 'sign':
-      if (actor.role !== 'tenant' || contract.status !== 'awaiting' || !contract.appointment || !payload.accepted) {
-        throw new Error('Cần đặt lịch và xác nhận đã đọc các điều khoản trước khi ký.')
+    case 'confirm-sign-and-deposit': {
+      const confirmed = Boolean(payload.accepted || (payload.signedAtLocation && payload.depositReceived))
+      if (contract.status !== 'awaiting' || !contract.appointment || !confirmed) {
+        throw new Error('Người môi giới cần xác nhận khách đã ký tại địa điểm hẹn và đã thu khoản tiền đặt cọc trên hợp đồng.')
       }
       if (contract.endDate < today) throw new Error('Thời hạn của hợp đồng này đã qua.')
       if (db.contracts.some((other) => other.id !== id && other.apartmentId === contract.apartmentId && other.status === 'signed' && overlaps(occupiedDates(other), contract))) {
         throw new Error('Căn hộ đã có hợp đồng đã ký trùng thời gian.')
       }
       if (db.apartments.find((unit) => unit.id === contract.apartmentId)?.condition === 'maintenance') throw new Error('Căn hộ đang bảo trì.')
-      changes = { status: 'signed', payment: 'paid', signedAt: new Date().toISOString() }
+      const confirmerId = actor.role === 'owner' ? actor.id : contract.ownerId
+      changes = {
+        status: 'signed',
+        payment: 'paid',
+        signedAt: new Date().toISOString(),
+        signedConfirmedBy: confirmerId,
+        paymentConfirmedBy: confirmerId,
+      }
       break
+    }
+    case 'cancel-no-show': {
+      if (actor.role !== 'owner' || contract.status !== 'signed') {
+        throw new Error('Chỉ người môi giới / chủ nhà mới được hủy hợp đồng đã ký quá hạn nhận phòng.')
+      }
+      if (contract.actualMoveIn) {
+        throw new Error('Khách hàng đã nhận phòng thực tế, không thể hủy theo điều khoản quá hạn dọn vào.')
+      }
+      const deadline = moveInDeadline(contract)
+      const checkDate = payload.today ?? today
+      if (checkDate <= deadline) {
+        throw new Error(`Chưa hết thời hạn 3 ngày kể từ ngày dọn vào quy định trên hợp đồng (${shortDate(deadline)}).`)
+      }
+      changes = {
+        status: 'cancelled',
+        depositForfeited: true,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: `Khách hàng không dọn vào trong 3 ngày kể từ ngày quy định (${shortDate(contract.startDate)}); hợp đồng bị hủy và mất tiền đặt cọc.`,
+      }
+      break
+    }
     case 'renewal':
       if (actor.role !== 'tenant' || !renewalOpen(contract, today) || contract.renewal || !['requested', 'declined'].includes(payload.choice)) {
         throw new Error('Hợp đồng này không thể cập nhật lựa chọn gia hạn.')
       }
       changes = { renewal: payload.choice }
       break
-    case 'handover':
+    case 'handover': {
       if (actor.role !== 'owner' || contract.status !== 'signed') throw new Error('Chỉ ghi nhận bàn giao cho hợp đồng đã ký.')
       if ((payload.actualMoveIn && payload.actualMoveIn > today) || (payload.actualMoveOut && payload.actualMoveOut > today)) {
         throw new Error('Ngày bàn giao thực tế phải là hôm nay hoặc trước đó.')
       }
       if (payload.actualMoveIn && payload.actualMoveOut && payload.actualMoveOut < payload.actualMoveIn) {
         throw new Error('Ngày trả phòng phải từ ngày nhận phòng trở đi.')
+      }
+      const deadline = moveInDeadline(contract)
+      if (payload.actualMoveIn && payload.actualMoveIn > deadline) {
+        throw new Error(`Khách dọn vào sau quá 3 ngày kể từ ngày quy định (${shortDate(contract.startDate)}); hợp đồng thuộc diện bị hủy và mất tiền cọc.`)
       }
       if (payload.actualMoveIn && payload.actualMoveIn < contract.startDate && db.contracts.some((other) =>
         other.id !== id && other.apartmentId === contract.apartmentId && other.status === 'signed' &&
@@ -160,10 +303,11 @@ export function updateContract(db, actor, id, action, payload = {}, today = date
       }
       changes = { actualMoveIn: payload.actualMoveIn, actualMoveOut: payload.actualMoveOut }
       break
+    }
     default:
       throw new Error('Thao tác không hợp lệ.')
   }
-  const apartments = action === 'sign'
+  const apartments = (action === 'sign' || action === 'confirm-sign-and-deposit')
     ? db.apartments.map((item) => item.id === contract.apartmentId ? { ...item, published: false } : item)
     : db.apartments
   return { ...db, apartments, invoices, contracts: db.contracts.map((item) => item.id === id ? { ...item, ...changes } : item) }
@@ -182,19 +326,29 @@ export function addContract(db, actor, unit, terms) {
   if (actor.role === 'owner' ? property.ownerId !== actor.id : actor.role !== 'tenant' || !unit.published || unitStatus(db, unit) !== 'ready') {
     throw new Error('Căn hộ không khả dụng để tạo hợp đồng.')
   }
-  if (!terms.startDate || !terms.endDate || terms.startDate < dateAt() || terms.endDate < terms.startDate || !Number.isSafeInteger(terms.rent) || terms.rent <= 0) {
+  const leaseTermUnit = terms.leaseTermUnit || 'CUSTOM'
+  const leaseTermValue = Number(terms.leaseTermValue || 1)
+  const startDate = terms.startDate
+  const endDate = terms.endDate || ((leaseTermUnit === 'MONTH' || leaseTermUnit === 'YEAR')
+    ? calculateEndDateForTerm(startDate, leaseTermUnit, leaseTermValue)
+    : '')
+  if (!startDate || !endDate || startDate < dateAt() || endDate < startDate || !Number.isSafeInteger(terms.rent) || terms.rent <= 0) {
     throw new Error('Kiểm tra lại thời hạn và tiền thuê.')
   }
   const tenantId = actor.role === 'tenant' ? actor.id : terms.tenantId
   if (identity(tenantId)?.role !== 'tenant') throw new Error('Chọn khách thuê.')
   if (terms.renewalOf && (actor.role !== 'owner' || !base || base.apartmentId !== unit.id || base.tenantId !== tenantId ||
-    base.renewal !== 'requested' || terms.startDate <= base.endDate || db.contracts.some((item) => item.renewalOf === base.id))) {
+    base.renewal !== 'requested' || startDate <= base.endDate || db.contracts.some((item) => item.renewalOf === base.id && item.status !== 'cancelled'))) {
     throw new Error('Kiểm tra lại yêu cầu gia hạn và thời hạn của hợp đồng mới.')
   }
-  const conflict = db.contracts.some((item) => item.apartmentId === unit.id && overlaps(occupiedDates(item), terms) &&
+  const candidateDates = { startDate, endDate }
+  const conflict = db.contracts.some((item) => item.apartmentId === unit.id && item.status !== 'cancelled' && overlaps(occupiedDates(item), candidateDates) &&
     (item.status === 'signed' || item.tenantId === tenantId))
   if (conflict) throw new Error('Đã có hợp đồng hoặc yêu cầu của khách thuê này trùng thời gian.')
-  const contract = makeContract(db, unit.id, tenantId, terms.startDate, terms.endDate, terms.rent, terms.renewalOf)
+  const contract = makeContract(db, unit.id, tenantId, startDate, endDate, terms.rent, terms.renewalOf, {
+    leaseTermUnit,
+    leaseTermValue,
+  })
   return { db: { ...db, contracts: [...db.contracts, contract] }, contract }
 }
 
@@ -206,13 +360,106 @@ export function billForMonth(db, actor, contract, month, values) {
   const { oldElectric, newElectric, oldWater, newWater } = values
   if (![oldElectric, newElectric, oldWater, newWater].every((value) => Number.isSafeInteger(value) && value >= 0) ||
     newElectric < oldElectric || newWater < oldWater) throw new Error('Chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ.')
+
+  const breakdown = calculateLeaseBreakdown(contract.startDate, contract.endDate, contract.rent)
+  const matchedPeriod = breakdown.periods.find((p) => p.billingMonth === month) ?? breakdown.periods[0]
+  const rentAmount = matchedPeriod ? matchedPeriod.rentAmount : contract.rent
+  const rentTitle = matchedPeriod && !matchedPeriod.fullMonth
+    ? `Tiền thuê (${matchedPeriod.daysInPeriod}/${matchedPeriod.monthBasisDays} ngày)`
+    : 'Tiền thuê'
+
   const lines = [
-    { title: 'Tiền thuê', amount: contract.rent },
+    { title: rentTitle, amount: rentAmount },
     { title: `Tiền điện (${newElectric - oldElectric} kWh)`, amount: (newElectric - oldElectric) * contract.electricRate },
     { title: `Tiền nước (${newWater - oldWater} m³)`, amount: (newWater - oldWater) * contract.waterRate },
   ]
-  return { ...db, invoices: [...db.invoices, { id: globalThis.crypto.randomUUID(), contractId: contract.id, month, ...values, lines, status: 'unpaid' }] }
+  return {
+    ...db,
+    invoices: [
+      ...db.invoices,
+      {
+        id: globalThis.crypto.randomUUID(),
+        contractId: contract.id,
+        month,
+        periodStart: matchedPeriod?.periodStart ?? contract.startDate,
+        periodEnd: matchedPeriod?.periodEnd ?? contract.endDate,
+        daysInPeriod: matchedPeriod?.daysInPeriod ?? 30,
+        monthBasisDays: matchedPeriod?.monthBasisDays ?? 30,
+        ...values,
+        lines,
+        status: 'unpaid',
+      },
+    ],
+  }
 }
 
 export const invoiceTotal = (invoice) => invoice.lines.reduce((sum, line) => sum + line.amount, 0)
 export const unitImage = (unit) => unit.customImage || `/images/${unit.image}.webp`
+
+// ============================================================================
+// Kết nối trực tiếp tới Backend API (apartment-rental-backend)
+// ============================================================================
+
+const API_BASE = import.meta.env?.VITE_API_BASE_URL || '/api'
+
+export async function apiRequest(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  })
+  if (!response.ok) {
+    let message = `Lỗi kết nối máy chủ (${response.status})`
+    try {
+      const err = await response.json()
+      if (err?.message) message = err.message
+    } catch {
+      // Ignore JSON parse error
+    }
+    throw new Error(message)
+  }
+  if (response.status === 204) return null
+  return response.json()
+}
+
+export const backendApi = {
+  checkHealth: () => apiRequest('/health'),
+  login: (userIdOrEmail, password = 'AnCu@123') =>
+    apiRequest('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ userId: userIdOrEmail, email: userIdOrEmail, password }),
+    }),
+  logout: () => apiRequest('/auth/logout', { method: 'POST' }),
+  me: () => apiRequest('/auth/me'),
+  listPublicApartments: (params = '') => apiRequest(`/public/apartments${params ? `?${params}` : ''}`),
+  listOwnerBuildings: () => apiRequest('/owner/buildings'),
+  createBuilding: (body) => apiRequest('/owner/buildings', { method: 'POST', body: JSON.stringify(body) }),
+  updateBuilding: (id, body) => apiRequest(`/owner/buildings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  listOwnerApartments: () => apiRequest('/owner/apartments'),
+  createApartment: (body) => apiRequest('/owner/apartments', { method: 'POST', body: JSON.stringify(body) }),
+  updateApartment: (id, body) => apiRequest(`/owner/apartments/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updateListing: (id, body) => apiRequest(`/owner/apartments/${id}/listing`, { method: 'PATCH', body: JSON.stringify(body) }),
+  togglePublish: (id, published) =>
+    apiRequest(`/owner/apartments/${id}/publish`, { method: 'PATCH', body: JSON.stringify({ published }) }),
+  listContracts: () => apiRequest('/contracts'),
+  createContract: (body) => apiRequest('/contracts', { method: 'POST', body: JSON.stringify(body) }),
+  scheduleContract: (id, appointment) =>
+    apiRequest(`/contracts/${id}/schedule`, { method: 'POST', body: JSON.stringify({ appointment }) }),
+  confirmSignAndDeposit: (id, body) =>
+    apiRequest(`/contracts/${id}/confirm-sign-and-deposit`, { method: 'POST', body: JSON.stringify(body) }),
+  cancelNoShow: (id, today) =>
+    apiRequest(`/contracts/${id}/cancel-no-show${today ? `?today=${today}` : ''}`, { method: 'POST' }),
+  recordHandover: (id, body) =>
+    apiRequest(`/contracts/${id}/handover`, { method: 'POST', body: JSON.stringify(body) }),
+  respondRenewal: (id, choice) =>
+    apiRequest(`/contracts/${id}/renewal`, { method: 'POST', body: JSON.stringify({ choice }) }),
+  createInvoice: (contractId, body) =>
+    apiRequest(`/contracts/${contractId}/invoices`, { method: 'POST', body: JSON.stringify(body) }),
+  listInvoices: () => apiRequest('/invoices'),
+  confirmInvoicePaid: (id) => apiRequest(`/invoices/${id}/confirm-paid`, { method: 'POST' }),
+  listFavorites: () => apiRequest('/favorites'),
+  toggleFavorite: (apartmentId) => apiRequest(`/favorites/${apartmentId}/toggle`, { method: 'POST' }),
+}

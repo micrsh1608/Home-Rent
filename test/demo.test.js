@@ -1,6 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addContract, billForMonth, dateAt, identity, invoiceTotal, loadDemo, makeContract, updateContract } from '../src/demo.js'
+import {
+  addContract,
+  billForMonth,
+  calculateEndDateForTerm,
+  calculateLeaseBreakdown,
+  canCancelNoShow,
+  dateAt,
+  identity,
+  invoiceTotal,
+  loadDemo,
+  makeContract,
+  monthBasisDays,
+  plusDays,
+  unitStatus,
+  updateContract,
+} from '../src/demo.js'
 
 const tenant = identity('t1')
 const owner = identity('o1')
@@ -24,6 +39,70 @@ test('scheduling and rescheduling change only the appointment; an accepted signa
   assert.equal(db.contracts.at(-1).payment, 'paid')
   assert.equal(db.apartments[0].published, false)
   assert.throws(() => updateContract(db, tenant, contract.id, 'sign', { accepted: true }))
+})
+
+test('decision 1: broker/owner confirms signature at appointment location & deposit payment, and cancels contract with forfeited deposit after 3 days no-show', () => {
+  let { db, contract } = request()
+  const slot = `${dateAt(1)}T10:00`
+  db = updateContract(db, tenant, contract.id, 'schedule', { now: `${dateAt()}T08:00`, appointment: slot })
+
+  // Missing either signature confirmation or deposit confirmation must fail
+  assert.throws(() => updateContract(db, owner, contract.id, 'confirm-sign-and-deposit', { signedAtLocation: true, depositReceived: false }))
+  assert.throws(() => updateContract(db, owner, contract.id, 'confirm-sign-and-deposit', { signedAtLocation: false, depositReceived: true }))
+
+  // Confirming both transitions contract to signed + paid and hides the listing
+  db = updateContract(db, owner, contract.id, 'confirm-sign-and-deposit', { signedAtLocation: true, depositReceived: true })
+  const signedContract = db.contracts.at(-1)
+  assert.equal(signedContract.status, 'signed')
+  assert.equal(signedContract.payment, 'paid')
+  assert.equal(signedContract.signedConfirmedBy, owner.id)
+  assert.equal(signedContract.paymentConfirmedBy, owner.id)
+  assert.equal(db.apartments[0].published, false)
+
+  // Within 3 days of startDate (startDate + 3), cannot cancel for no-show
+  const deadline = plusDays(signedContract.startDate, 3)
+  assert.equal(canCancelNoShow(signedContract, deadline), false)
+  assert.throws(() => updateContract(db, owner, contract.id, 'cancel-no-show', { today: deadline }))
+
+  // Recording move-in more than 3 days after startDate is rejected
+  const afterDeadline = plusDays(signedContract.startDate, 4)
+  assert.throws(() => updateContract(db, owner, contract.id, 'handover', { actualMoveIn: afterDeadline }, afterDeadline))
+
+  // On day 4 without move-in, owner/broker can cancel and tenant forfeits deposit
+  assert.equal(canCancelNoShow(signedContract, afterDeadline), true)
+  db = updateContract(db, owner, contract.id, 'cancel-no-show', { today: afterDeadline }, afterDeadline)
+  const cancelled = db.contracts.at(-1)
+  assert.equal(cancelled.status, 'cancelled')
+  assert.equal(cancelled.depositForfeited, true)
+  assert.ok(cancelled.cancellationReason.includes('mất tiền đặt cọc'))
+  assert.equal(unitStatus(db, db.apartments[0], afterDeadline), 'ready')
+})
+
+test('decision 2: first and last period rent calculation from move-in date with 30/31-day months and February counted as 30 days', () => {
+  // Month basis days check: 31-day months = 31, 30-day months = 30, February = 30
+  assert.equal(monthBasisDays(1), 31)
+  assert.equal(monthBasisDays(2), 30)
+  assert.equal(monthBasisDays(3), 31)
+  assert.equal(monthBasisDays(4), 30)
+
+  // 1 month starting in February (2026-02-10) spans 30 days (2026-02-10 -> 2026-03-11)
+  const febEnd = calculateEndDateForTerm('2026-02-10', 'MONTH', 1)
+  assert.equal(febEnd, '2026-03-11')
+  const febBreakdown = calculateLeaseBreakdown('2026-02-10', febEnd, 12000000)
+  assert.equal(febBreakdown.totalPeriods, 1)
+  assert.equal(febBreakdown.firstPeriodRent, 12000000)
+  assert.equal(febBreakdown.lastPeriodRent, 12000000)
+  assert.equal(febBreakdown.periods[0].daysInPeriod, 30)
+  assert.equal(febBreakdown.periods[0].monthBasisDays, 30)
+
+  // Custom duration starting in a 31-day month (March) with a 15-day final period in April (30-day month)
+  // Period 1: 2026-03-10 -> 2026-04-09 (31/31 days = 12,000,000)
+  // Period 2: 2026-04-10 -> 2026-04-24 (15/30 days = 6,000,000)
+  const customBreakdown = calculateLeaseBreakdown('2026-03-10', '2026-04-24', 12000000)
+  assert.equal(customBreakdown.totalPeriods, 2)
+  assert.equal(customBreakdown.firstPeriodRent, 12000000)
+  assert.equal(customBreakdown.lastPeriodRent, 6000000)
+  assert.equal(customBreakdown.totalContractRent, 18000000)
 })
 
 test('one apartment cannot have overlapping signed contracts', () => {

@@ -1,7 +1,26 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Building2, CircleDollarSign, ClipboardList, DoorOpen, Plus, Receipt, Wrench } from 'lucide-react'
-import { addContract, billForMonth, contractCode, dateAt, expired, identity, invoiceTotal, money, people, plusDays, renewalOpen, shortDate, unitImage, unitStatus } from './demo'
+import {
+  addContract,
+  backendApi,
+  billForMonth,
+  calculateEndDateForTerm,
+  calculateLeaseBreakdown,
+  canCancelNoShow,
+  contractCode,
+  dateAt,
+  expired,
+  identity,
+  invoiceTotal,
+  money,
+  people,
+  plusDays,
+  renewalOpen,
+  shortDate,
+  unitImage,
+  unitStatus,
+} from './demo'
 import { ContractStatus, Invoices, PaymentStatus, RenewalStatus } from './contracts'
 import { Empty, Field, Modal, Notice, Select, Status, useDemo } from './shared'
 
@@ -37,12 +56,12 @@ export function OwnerDashboard() {
 }
 
 export function OwnerProperties() {
-  const { db, actor, buildings, units, save } = useOwner()
+  const { db, actor, buildings, units, save, apiConnected, refreshFromApi } = useOwner()
   const [filter, setFilter] = useState('')
   const [editor, setEditor] = useState(null)
   const [error, setError] = useState('')
   const open = (value) => { setError(''); setEditor(value) }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const text = (key) => String(data.get(key) || '').trim()
@@ -50,16 +69,47 @@ export function OwnerProperties() {
       if (editor.type === 'building') {
         const name = text('name'), address = text('address'), district = text('district')
         if (!name || !address || !district) throw new Error('Điền tên, khu vực và địa chỉ tòa nhà.')
-        const property = { id: editor.item?.id ?? crypto.randomUUID(), ownerId: actor.id, name, address, district,
-          location: text('location') || `Sảnh lễ tân ${name}, ${address}`, electricRate: Number(data.get('electricRate')), waterRate: Number(data.get('waterRate')) }
+        const property = {
+          id: editor.item?.id ?? crypto.randomUUID(),
+          ownerId: actor.id,
+          name,
+          address,
+          district,
+          location: text('location') || `Sảnh lễ tân ${name}, ${address}`,
+          electricRate: Number(data.get('electricRate')),
+          waterRate: Number(data.get('waterRate')),
+        }
+        if (apiConnected) {
+          if (editor.item) await backendApi.updateBuilding(property.id, property)
+          else await backendApi.createBuilding(property)
+          await refreshFromApi()
+        }
         save({ ...db, buildings: editor.item ? db.buildings.map((item) => item.id === property.id ? property : item) : [...db.buildings, property] }, 'Đã lưu tòa nhà.')
       } else {
         const buildingId = text('buildingId'), room = text('room'), title = text('title')
         if (!room || !title || !buildings.some((item) => item.id === buildingId)) throw new Error('Điền mã phòng, tên và tòa nhà.')
         if (units.some((item) => item.id !== editor.item?.id && item.buildingId === buildingId && item.room.toLowerCase() === room.toLowerCase())) throw new Error('Mã căn hộ đã tồn tại trong tòa nhà.')
-        const unit = { image: 'greenhouse', published: false, description: '', ...editor.item, id: editor.item?.id ?? crypto.randomUUID(), buildingId, room, title,
-          price: Number(data.get('price')), area: Number(data.get('area')), beds: Number(data.get('beds')), baths: Number(data.get('baths')), condition: text('condition') }
+        const unit = {
+          image: 'greenhouse',
+          published: false,
+          description: '',
+          ...editor.item,
+          id: editor.item?.id ?? crypto.randomUUID(),
+          buildingId,
+          room,
+          title,
+          price: Number(data.get('price')),
+          area: Number(data.get('area')),
+          beds: Number(data.get('beds')),
+          baths: Number(data.get('baths')),
+          condition: text('condition'),
+        }
         if (unit.condition === 'maintenance' && db.contracts.some((item) => item.apartmentId === unit.id && item.status === 'signed' && !expired(item))) throw new Error('Căn hộ có hợp đồng còn hiệu lực.')
+        if (apiConnected) {
+          if (editor.item) await backendApi.updateApartment(unit.id, unit)
+          else await backendApi.createApartment(unit)
+          await refreshFromApi()
+        }
         save({ ...db, apartments: editor.item ? db.apartments.map((item) => item.id === unit.id ? unit : item) : [...db.apartments, unit] }, 'Đã lưu căn hộ.')
       }
       setEditor(null)
@@ -89,17 +139,22 @@ export function OwnerProperties() {
 }
 
 export function OwnerListings() {
-  const { db, units, save } = useOwner()
+  const { db, units, save, apiConnected, refreshFromApi } = useOwner()
   const [editing, setEditing] = useState(null)
   const [error, setError] = useState('')
-  function update(unit, values, message) {
+  async function update(unit, values, message, mode = 'listing') {
+    if (apiConnected) {
+      if (mode === 'publish') await backendApi.togglePublish(unit.id, values.published)
+      else await backendApi.updateListing(unit.id, values)
+      await refreshFromApi()
+    }
     save({ ...db, apartments: db.apartments.map((item) => item.id === unit.id ? { ...item, ...values } : item) }, message)
   }
   return <><OwnerHeader title="Tin đăng" text="Chỉnh sửa nội dung và quyết định khi nào mở lại tin cho thuê." />
     {units.length ? <div className="table-wrap"><table><thead><tr><th>Tin căn hộ</th><th>Tình trạng căn hộ</th><th>Hiển thị</th><th>Thao tác</th></tr></thead><tbody>
       {units.map((unit) => {
         const state = unitStatus(db, unit)
-        return <tr key={unit.id}><td><div className="unit-cell"><img src={unitImage(unit)} alt="" /><div><b>{unit.title}</b><small>{unit.room}</small></div></div></td><td><UnitStatus value={state} /></td><td><Status tone={unit.published && state === 'ready' ? 'green' : 'neutral'}>{unit.published && state === 'ready' ? 'Đang hiển thị' : 'Đã ẩn'}</Status></td><td><div className="actions"><button className="button small outline" onClick={() => { setEditing(unit); setError('') }}>Chỉnh sửa</button>{state === 'ready' && <button className={`button small ${unit.published ? 'outline' : 'primary'}`} onClick={() => update(unit, { published: !unit.published }, unit.published ? 'Đã ẩn tin.' : 'Đã mở tin cho thuê.')}>{unit.published ? 'Ẩn tin' : 'Đăng tin'}</button>}</div></td></tr>
+        return <tr key={unit.id}><td><div className="unit-cell"><img src={unitImage(unit)} alt="" /><div><b>{unit.title}</b><small>{unit.room}</small></div></div></td><td><UnitStatus value={state} /></td><td><Status tone={unit.published && state === 'ready' ? 'green' : 'neutral'}>{unit.published && state === 'ready' ? 'Đang hiển thị' : 'Đã ẩn'}</Status></td><td><div className="actions"><button className="button small outline" onClick={() => { setEditing(unit); setError('') }}>Chỉnh sửa</button>{state === 'ready' && <button className={`button small ${unit.published ? 'outline' : 'primary'}`} onClick={() => update(unit, { published: !unit.published }, unit.published ? 'Đã ẩn tin.' : 'Đã mở tin cho thuê.', 'publish')}>{unit.published ? 'Ẩn tin' : 'Đăng tin'}</button>}</div></td></tr>
       })}
     </tbody></table></div> : <Empty title="Chưa có căn hộ để đăng tin"><Link className="button primary" to="/owner/can-ho">Quản lý căn hộ</Link></Empty>}
     {editing && <Modal title="Chỉnh sửa tin đăng" close={() => setEditing(null)}><form className="stack" onSubmit={async (event) => {
@@ -122,7 +177,7 @@ export function OwnerListings() {
           })
         } catch { setError('Không đọc được ảnh đã chọn.'); return }
       }
-      update(editing, { title, description, image: form.get('image'), customImage }, 'Đã lưu tin đăng.')
+      await update(editing, { title, description, image: form.get('image'), customImage }, 'Đã lưu tin đăng.', 'listing')
       setEditing(null)
     }}><Field label="Tiêu đề"><input name="title" defaultValue={editing.title} required /></Field><Field label="Mô tả"><textarea name="description" defaultValue={editing.description} required rows="4" /></Field>
       <Field label="Ảnh minh họa"><Select name="image" defaultValue={editing.image}><option value="river">Phòng khách bên sông</option><option value="lumiere">Studio nội thất gỗ</option><option value="urban">Căn hộ nhìn ra thành phố</option><option value="greenhouse">Căn hộ có ban công</option></Select></Field>
@@ -132,35 +187,125 @@ export function OwnerListings() {
 }
 
 function ContractTable({ contracts }) {
-  return <div className="table-wrap"><table><thead><tr><th>Căn hộ / Mã hợp đồng</th><th>Khách thuê</th><th>Thời hạn</th><th>Ký kết</th><th>Thanh toán</th><th></th></tr></thead><tbody>
-    {contracts.map((item) => <tr key={item.id}><td><b>{item.apartmentTitle}</b><small>{contractCode(item)}</small></td><td>{identity(item.tenantId).name}</td><td>{shortDate(item.startDate)} – {shortDate(item.endDate)}</td><td><ContractStatus contract={item} /></td><td><PaymentStatus paid={item.payment === 'paid'} /></td><td><Link className="button small outline" to={`/owner/hop-dong/${item.id}`}>Chi tiết</Link></td></tr>)}
+  return <div className="table-wrap"><table><thead><tr><th>Căn hộ / Mã hợp đồng</th><th>Khách thuê</th><th>Thời hạn</th><th>Ký kết</th><th>Thanh toán cọc</th><th></th></tr></thead><tbody>
+    {contracts.map((item) => <tr key={item.id}>
+      <td>
+        <b>{item.apartmentTitle}</b>
+        <small>{contractCode(item)}</small>
+        {item.status === 'awaiting' && item.appointment && <small>Đã có lịch hẹn — chờ xác nhận ký & cọc</small>}
+        {canCancelNoShow(item) && <small>Quá hạn nhận phòng 3 ngày</small>}
+      </td>
+      <td>{identity(item.tenantId).name}</td>
+      <td>{shortDate(item.startDate)} – {shortDate(item.endDate)}</td>
+      <td><ContractStatus contract={item} /></td>
+      <td><PaymentStatus paid={item.payment === 'paid'} forfeited={item.depositForfeited} /></td>
+      <td><Link className="button small outline" to={`/owner/hop-dong/${item.id}`}>Chi tiết</Link></td>
+    </tr>)}
   </tbody></table></div>
 }
 
+const leaseTermOptions = [
+  ['1M', '1 tháng (30/31 ngày; tháng 2 tính 30 ngày)', 'MONTH', 1],
+  ['6M', '6 tháng (theo chuẩn chu kỳ tháng)', 'MONTH', 6],
+  ['1Y', '1 năm (12 tháng)', 'YEAR', 1],
+  ['CUSTOM', 'Tùy chọn thời gian thuê', 'CUSTOM', 1],
+]
+
 function CreateContract({ base, close }) {
-  const { db, actor, units, save } = useOwner()
+  const { db, actor, units, save, apiConnected, refreshFromApi } = useOwner()
   const navigate = useNavigate()
   const candidates = units.filter((unit) => unit.condition !== 'maintenance' && (!base || unit.id === base.apartmentId))
   const [unitId, setUnitId] = useState(candidates[0]?.id ?? '')
-  const [error, setError] = useState('')
   const unit = candidates.find((item) => item.id === unitId)
   const minStart = base && base.endDate >= dateAt() ? plusDays(base.endDate, 1) : dateAt()
-  function submit(event) {
+  const initialStart = base ? minStart : dateAt(7)
+  const [termKey, setTermKey] = useState('6M')
+  const [startDate, setStartDate] = useState(initialStart)
+  const [endDate, setEndDate] = useState(() => calculateEndDateForTerm(initialStart, 'MONTH', 6))
+  const [rent, setRent] = useState(base?.rent ?? unit?.price ?? 0)
+  const [error, setError] = useState('')
+
+  function handleUnitChange(nextUnitId) {
+    setUnitId(nextUnitId)
+    const nextUnit = candidates.find((item) => item.id === nextUnitId)
+    if (nextUnit && !base) setRent(nextUnit.price)
+  }
+
+  function handleTermChange(nextKey) {
+    setTermKey(nextKey)
+    const found = leaseTermOptions.find(([key]) => key === nextKey)
+    if (found && found[2] !== 'CUSTOM' && startDate) {
+      setEndDate(calculateEndDateForTerm(startDate, found[2], found[3]))
+    }
+  }
+
+  function handleStartChange(nextStart) {
+    setStartDate(nextStart)
+    const found = leaseTermOptions.find(([key]) => key === termKey)
+    if (found && found[2] !== 'CUSTOM' && nextStart) {
+      setEndDate(calculateEndDateForTerm(nextStart, found[2], found[3]))
+    }
+  }
+
+  const activeTerm = leaseTermOptions.find(([key]) => key === termKey) ?? leaseTermOptions[1]
+  const breakdown = calculateLeaseBreakdown(startDate, endDate, Number(rent))
+  const firstPeriod = breakdown.periods[0]
+  const lastPeriod = breakdown.periods.at(-1)
+
+  async function submit(event) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     try {
-      const result = addContract(db, actor, unit, { tenantId: base?.tenantId ?? form.get('tenantId'), startDate: form.get('startDate'), endDate: form.get('endDate'), rent: Number(form.get('rent')), renewalOf: base?.id })
+      const tenantId = base?.tenantId ?? form.get('tenantId')
+      const payload = {
+        tenantId,
+        startDate,
+        endDate,
+        rent: Number(rent),
+        renewalOf: base?.id,
+        leaseTermUnit: activeTerm[2],
+        leaseTermValue: activeTerm[3],
+      }
+      const result = addContract(db, actor, unit, payload)
+      let targetId = result.contract.id
+      if (apiConnected) {
+        const created = await backendApi.createContract({
+          apartmentId: unit.id,
+          tenantId,
+          startDate,
+          endDate,
+          rent: Number(rent),
+          renewalOf: base?.id ?? null,
+          leaseTermUnit: activeTerm[2],
+          leaseTermValue: activeTerm[3],
+        })
+        if (created?.id) targetId = created.id
+        await refreshFromApi()
+      }
       save(result.db, 'Đã tạo hợp đồng chờ ký.')
       close()
-      navigate(`/owner/hop-dong/${result.contract.id}`)
+      navigate(`/owner/hop-dong/${targetId}`)
     } catch (problem) { setError(problem.message) }
   }
   return <Modal title={base ? 'Lập hợp đồng gia hạn' : 'Tạo hợp đồng mới'} close={close}>
-    {unit ? <form className="stack" onSubmit={submit}><Field label="Căn hộ"><Select value={unitId} onChange={(event) => setUnitId(event.target.value)}>{candidates.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.room}</option>)}</Select></Field>
+    {unit ? <form className="stack" onSubmit={submit}>
+      <Field label="Căn hộ"><Select value={unitId} onChange={(event) => handleUnitChange(event.target.value)}>{candidates.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.room}</option>)}</Select></Field>
       <Field label="Khách thuê"><Select name="tenantId" defaultValue={base?.tenantId ?? ''} required><option value="" disabled>Chọn khách thuê</option>{people.filter((item) => item.role === 'tenant' && (!base || item.id === base.tenantId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
-      <div className="form-grid"><Field label="Ngày bắt đầu"><input name="startDate" type="date" min={minStart} defaultValue={base ? minStart : dateAt(7)} required /></Field><Field label="Ngày kết thúc"><input name="endDate" type="date" min={minStart} defaultValue={plusDays(minStart, 179)} required /></Field></div>
-      <Field label="Tiền thuê/tháng (₫)"><input type="number" name="rent" min="1" key={unit.id} defaultValue={base?.rent ?? unit.price} required /></Field>
-      {base && <Notice>Hợp đồng kỳ mới có mã và thời hạn riêng, liên kết với {contractCode(base)}.</Notice>}{error && <Notice error>{error}</Notice>}<button className="button primary">Tạo hợp đồng chờ ký</button>
+      <Field label="Hình thức thời hạn thuê"><Select value={termKey} onChange={(event) => handleTermChange(event.target.value)}>{leaseTermOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></Field>
+      <div className="form-grid">
+        <Field label="Ngày bắt đầu (dọn vào)"><input name="startDate" type="date" min={minStart} value={startDate} onChange={(event) => handleStartChange(event.target.value)} required /></Field>
+        <Field label="Ngày kết thúc"><input name="endDate" type="date" min={startDate || minStart} value={endDate} onChange={(event) => { setTermKey('CUSTOM'); setEndDate(event.target.value) }} required /></Field>
+      </div>
+      <Field label="Tiền thuê/tháng (₫)"><input type="number" name="rent" min="1" value={rent} onChange={(event) => setRent(Number(event.target.value))} required /></Field>
+      {breakdown.totalPeriods > 0 && <dl className="facts">
+        <div><dt>Tiền đặt cọc (thu khi ký)</dt><dd>{money(Number(rent))}</dd></div>
+        <div><dt>Tiền thuê kỳ đầu ({firstPeriod.daysInPeriod}/{firstPeriod.monthBasisDays} ngày)</dt><dd>{money(breakdown.firstPeriodRent)}</dd></div>
+        <div><dt>Tiền thuê kỳ cuối ({lastPeriod.daysInPeriod}/{lastPeriod.monthBasisDays} ngày)</dt><dd>{money(breakdown.lastPeriodRent)}</dd></div>
+        <div><dt>Hạn chót nhận phòng (3 ngày)</dt><dd>{shortDate(plusDays(startDate, 3))}</dd></div>
+      </dl>}
+      {base && <Notice>Hợp đồng kỳ mới có mã và thời hạn riêng, liên kết với {contractCode(base)}.</Notice>}
+      {error && <Notice error>{error}</Notice>}
+      <button className="button primary">Tạo hợp đồng chờ ký</button>
     </form> : <Empty title="Không có căn hộ sẵn sàng" />}
   </Modal>
 }
@@ -181,7 +326,7 @@ export function OwnerTenants() {
   return <><OwnerHeader title="Khách thuê" text="Xem thời hạn thuê và phản hồi gia hạn của từng khách thuê." />
     {list.length ? <div className="table-wrap"><table><thead><tr><th>Khách thuê</th><th>Căn hộ</th><th>Hết hạn</th><th>Gia hạn</th><th>Thao tác</th></tr></thead><tbody>
       {list.map((item) => <tr key={item.id}><td><b>{identity(item.tenantId).name}</b><small>{contractCode(item)}</small></td><td>{item.apartmentTitle}</td><td>{shortDate(item.endDate)}</td><td><RenewalStatus contract={item} db={db} /></td><td><div className="actions"><Link className="button small outline" to={`/owner/hop-dong/${item.id}`}>Hợp đồng</Link>
-        {item.renewal === 'requested' && !db.contracts.some((other) => other.renewalOf === item.id) && <button className="button small primary" onClick={() => setBase(item)}>Lập hợp đồng mới</button>}
+        {item.renewal === 'requested' && !db.contracts.some((other) => other.renewalOf === item.id && other.status !== 'cancelled') && <button className="button small primary" onClick={() => setBase(item)}>Lập hợp đồng mới</button>}
         {expired(item) && item.renewal === 'declined' && <Link className="button small primary" to="/owner/tin-dang">Quản lý đăng lại</Link>}
       </div></td></tr>)}
     </tbody></table></div> : <Empty title="Chưa có khách thuê đã ký hợp đồng" />}
@@ -190,7 +335,7 @@ export function OwnerTenants() {
 }
 
 export function OwnerBilling() {
-  const { db, actor, contracts, save } = useOwner()
+  const { db, actor, contracts, save, apiConnected, refreshFromApi } = useOwner()
   const [open, setOpen] = useState(false)
   const [id, setId] = useState('')
   const [month, setMonth] = useState('')
@@ -198,18 +343,25 @@ export function OwnerBilling() {
   const eligible = contracts.filter((item) => item.status === 'signed')
   const selected = eligible.find((item) => item.id === id)
   const previous = db.invoices.filter((item) => item.contractId === id && item.kind !== 'early-move-in' && item.month < month).sort((a, b) => b.month.localeCompare(a.month))[0]
+  const breakdown = selected ? calculateLeaseBreakdown(selected.startDate, selected.endDate, selected.rent) : null
+  const matchedPeriod = breakdown?.periods.find((p) => p.billingMonth === month) ?? breakdown?.periods[0]
   function choose(id) {
     const item = eligible.find((contract) => contract.id === id)
     const current = dateAt().slice(0, 7)
     setId(id)
     setMonth([item.startDate.slice(0, 7), current, item.endDate.slice(0, 7)].sort()[1])
   }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const values = Object.fromEntries(['oldElectric', 'newElectric', 'oldWater', 'newWater'].map((key) => [key, Number(form.get(key))]))
     try {
-      save(billForMonth(db, actor, selected, month, values), 'Đã lập hóa đơn tháng.')
+      const nextDb = billForMonth(db, actor, selected, month, values)
+      if (apiConnected) {
+        await backendApi.createInvoice(selected.id, { month, ...values })
+        await refreshFromApi()
+      }
+      save(nextDb, 'Đã lập hóa đơn tháng.')
       setOpen(false)
     } catch (problem) { setError(problem.message) }
   }
@@ -223,7 +375,10 @@ export function OwnerBilling() {
           <div className="form-grid"><Field label="Điện cũ (kWh)"><input name="oldElectric" type="number" min="0" defaultValue={previous?.newElectric ?? 0} required /></Field><Field label="Điện mới (kWh)"><input name="newElectric" type="number" min="0" required /></Field></div>
           <div className="form-grid"><Field label="Nước cũ (m³)"><input name="oldWater" type="number" min="0" defaultValue={previous?.newWater ?? 0} required /></Field><Field label="Nước mới (m³)"><input name="newWater" type="number" min="0" required /></Field></div>
         </div>
-        <Notice><ClipboardList size={18} /> Tiền thuê theo hợp đồng {money(selected.rent)}/tháng.</Notice>{error && <Notice error>{error}</Notice>}<button className="button primary">Lưu hóa đơn</button>
+        <Notice><ClipboardList size={18} /> {matchedPeriod
+          ? `Tiền thuê kỳ này (${shortDate(matchedPeriod.periodStart)} – ${shortDate(matchedPeriod.periodEnd)}, ${matchedPeriod.daysInPeriod}/${matchedPeriod.monthBasisDays} ngày): ${money(matchedPeriod.rentAmount)}.`
+          : `Tiền thuê theo hợp đồng ${money(selected.rent)}/tháng.`}</Notice>
+        {error && <Notice error>{error}</Notice>}<button className="button primary">Lưu hóa đơn</button>
       </form> : <Empty title="Cần có hợp đồng đã ký để lập hóa đơn" />}
     </Modal>}
   </>

@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Bell, Building2, Check, ChevronDown, CircleHelp, FileText, Heart, House, LayoutDashboard, LogOut, Menu, Newspaper, Receipt, Users, X } from 'lucide-react'
-import { dateAt, identity, loadDemo, renewalOpen, storageKey } from './demo'
+import { backendApi, dateAt, identity, loadDemo, renewalOpen, storageKey } from './demo'
 
 const Context = createContext(null)
 
@@ -10,31 +10,138 @@ export function DemoProvider({ children }) {
   const [db, setDb] = useState(loadDemo)
   const [actorId, setActorId] = useState(() => sessionStorage.getItem('an-cu-actor'))
   const [toast, setToast] = useState('')
+  const [apiConnected, setApiConnected] = useState(false)
   const actor = identity(actorId)
+
   useEffect(() => {
     try { localStorage.setItem(storageKey, JSON.stringify(db)) } catch { /* Keep the in-memory session. */ }
   }, [db])
+
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(''), 3600)
     return () => clearTimeout(timer)
   }, [toast])
+
+  async function refreshFromBackend(currentActorId = actorId) {
+    try {
+      await backendApi.checkHealth()
+      setApiConnected(true)
+      const publicData = await backendApi.listPublicApartments('size=100')
+      let mergedBuildings = db.buildings
+      let mergedApartments = db.apartments
+      let mergedContracts = db.contracts
+      let mergedInvoices = db.invoices
+      let mergedFavorites = { ...db.favorites }
+
+      if (publicData?.items) {
+        const publicById = new Map(publicData.items.map((item) => [item.id, {
+          ...item,
+          area: Number(item.area),
+        }]))
+        mergedApartments = mergedApartments.map((unit) => publicById.get(unit.id) ?? unit)
+        for (const item of publicData.items) {
+          if (!mergedApartments.some((u) => u.id === item.id)) {
+            mergedApartments.push({ ...item, area: Number(item.area) })
+          }
+        }
+      }
+
+      if (currentActorId) {
+        const currentRole = identity(currentActorId)?.role
+        await backendApi.login(currentActorId, 'AnCu@123')
+        if (currentRole === 'owner') {
+          const [ownerBuildings, ownerUnits] = await Promise.all([
+            backendApi.listOwnerBuildings(),
+            backendApi.listOwnerApartments(),
+          ])
+          const otherBuildings = mergedBuildings.filter((b) => b.ownerId !== currentActorId)
+          mergedBuildings = [...otherBuildings, ...ownerBuildings]
+          const ownerUnitById = new Map(ownerUnits.map((u) => [u.id, { ...u, area: Number(u.area) }]))
+          mergedApartments = mergedApartments.map((u) => ownerUnitById.get(u.id) ?? u)
+          for (const u of ownerUnits) {
+            if (!mergedApartments.some((item) => item.id === u.id)) {
+              mergedApartments.push({ ...u, area: Number(u.area) })
+            }
+          }
+        }
+        const [contracts, invoices, favs] = await Promise.all([
+          backendApi.listContracts(),
+          backendApi.listInvoices(),
+          backendApi.listFavorites(),
+        ])
+        const normalizedContracts = contracts.map((c) => ({
+          ...c,
+          appointment: c.appointment ? String(c.appointment).slice(0, 16) : '',
+          actualMoveIn: c.actualMoveIn ?? '',
+          actualMoveOut: c.actualMoveOut ?? '',
+        }))
+        const byContractId = new Map(normalizedContracts.map((c) => [c.id, c]))
+        mergedContracts = [
+          ...mergedContracts.filter((c) => !byContractId.has(c.id)),
+          ...normalizedContracts,
+        ]
+        const byInvoiceId = new Map(invoices.map((i) => [i.id, i]))
+        mergedInvoices = [
+          ...mergedInvoices.filter((i) => !byInvoiceId.has(i.id)),
+          ...invoices,
+        ]
+        if (favs?.favoriteIds) {
+          mergedFavorites[currentActorId] = favs.favoriteIds
+        }
+      }
+
+      setDb((prev) => ({
+        ...prev,
+        buildings: mergedBuildings,
+        apartments: mergedApartments,
+        contracts: mergedContracts,
+        invoices: mergedInvoices,
+        favorites: mergedFavorites,
+      }))
+    } catch {
+      setApiConnected(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshFromBackend(actorId)
+  }, [actorId])
+
   function login(id) {
     setActorId(id)
-    if (id) sessionStorage.setItem('an-cu-actor', id)
-    else sessionStorage.removeItem('an-cu-actor')
+    if (id) {
+      sessionStorage.setItem('an-cu-actor', id)
+      backendApi.login(id, 'AnCu@123').catch(() => {})
+    } else {
+      sessionStorage.removeItem('an-cu-actor')
+      backendApi.logout().catch(() => {})
+    }
   }
+
   function save(value, message) {
     setDb(value)
     if (message) setToast(message)
   }
+
   function toggleFavorite(id) {
     const key = actor?.id ?? 'guest'
     const list = db.favorites[key] ?? []
     const saved = list.includes(id)
-    save({ ...db, favorites: { ...db.favorites, [key]: saved ? list.filter((item) => item !== id) : [...list, id] } }, saved ? 'Đã bỏ lưu căn hộ.' : 'Đã lưu căn hộ.')
+    save(
+      { ...db, favorites: { ...db.favorites, [key]: saved ? list.filter((item) => item !== id) : [...list, id] } },
+      saved ? 'Đã bỏ lưu căn hộ.' : 'Đã lưu căn hộ.',
+    )
+    if (actor && apiConnected) {
+      backendApi.toggleFavorite(id).then(() => refreshFromBackend(actor.id)).catch(() => {})
+    }
   }
-  return <Context.Provider value={{ db, actor, login, save, toggleFavorite, favorites: db.favorites[actor?.id ?? 'guest'] ?? [] }}>
+
+  return <Context.Provider value={{
+    db, actor, login, save, toggleFavorite,
+    favorites: db.favorites[actor?.id ?? 'guest'] ?? [],
+    apiConnected, refreshFromBackend,
+  }}>
     {children}
     <div className="toast-region" role="status">{toast && <div className="toast"><Check size={19} />{toast}</div>}</div>
   </Context.Provider>
@@ -80,13 +187,13 @@ export function PublicLayout() {
 }
 
 export function RoleLayout({ role }) {
-  const { actor, db, login } = useDemo()
+  const { actor, db, login, apiConnected } = useDemo()
   const navigate = useNavigate()
   const location = useLocation()
   if (actor?.role !== role) return <Navigate to="/dang-nhap" state={{ from: location.pathname, role }} replace />
   const count = role === 'tenant'
     ? db.contracts.filter((item) => item.tenantId === actor.id && !item.renewal && renewalOpen(item, dateAt())).length
-    : db.contracts.filter((item) => item.ownerId === actor.id && item.renewal === 'requested' && !db.contracts.some((other) => other.renewalOf === item.id)).length
+    : db.contracts.filter((item) => item.ownerId === actor.id && item.renewal === 'requested' && !db.contracts.some((other) => other.renewalOf === item.id && other.status !== 'cancelled')).length
   const items = role === 'owner' ? [
     ['/owner', 'Tổng quan', LayoutDashboard],
     ['/owner/can-ho', 'Tòa nhà & căn hộ', Building2],
@@ -108,7 +215,7 @@ export function RoleLayout({ role }) {
     <div className="workspace-main">
       <header className="workspace-header">
         <div className="workspace-user">
-          <span className="demo-label">Bản demo</span>
+          <span className="demo-label">{apiConnected ? 'Đã kết nối Backend API' : 'Bản demo'}</span>
           <Link className="icon-btn bell" aria-label={`${count} thông báo cần xem`} to={role === 'owner' ? '/owner/khach-thue' : '/tenant'}><Bell size={21} />{count > 0 && <span className="count">{count}</span>}</Link>
           <span className="avatar">{actor.name.split(' ').at(-1).slice(0, 1)}</span><b>{actor.name}</b>
           <button className="icon-btn" title="Đăng xuất" aria-label="Đăng xuất" onClick={() => { flushSync(() => navigate('/', { replace: true })); login(null) }}><LogOut size={18} /></button>

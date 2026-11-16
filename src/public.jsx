@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowDown, ArrowLeft, ArrowRight, Bath, BedDouble, Building2, CalendarDays, ChevronDown, FileCheck2, Heart, KeyRound, MapPin, Maximize, Search, SlidersHorizontal, UserRound } from 'lucide-react'
-import { addContract, dateAt, identity, money, people, plusDays, unitImage, unitStatus } from './demo'
+import { addContract, backendApi, calculateEndDateForTerm, calculateLeaseBreakdown, dateAt, identity, money, people, plusDays, shortDate, unitImage, unitStatus } from './demo'
 import { Empty, Field, Modal, Notice, Select, Status, useDemo } from './shared'
 import { BudgetFilter, DistrictFilter, formatBudget } from './SearchFilters'
 
@@ -175,8 +175,8 @@ export function Guide() {
   const steps = [
     [Search, 'Chọn căn hộ', 'Lọc theo khu vực, ngân sách và số phòng ngủ. Mở từng tin để xem chi phí và thông tin chủ nhà.'],
     [CalendarDays, 'Đặt lịch ký', 'Chọn ngày và giờ ký thuận tiện. Địa điểm ký được ghi sẵn trong hợp đồng.'],
-    [FileCheck2, 'Đọc và ký hợp đồng', 'Kiểm tra thời hạn, tiền thuê, phí và điều khoản bàn giao trước khi xác nhận ký.'],
-    [KeyRound, 'Theo dõi kỳ thuê', 'Xem hóa đơn hàng tháng và phản hồi yêu cầu gia hạn khi hợp đồng sắp hết hạn.'],
+    [FileCheck2, 'Xác nhận ký & thu tiền cọc', 'Người môi giới xác nhận khách đã ký tại địa điểm hẹn và thu khoản tiền đặt cọc để kích hoạt hợp đồng. Dọn vào trong vòng 3 ngày kể từ ngày quy định.'],
+    [KeyRound, 'Theo dõi kỳ thuê', 'Xem bảng tính tiền thuê kỳ đầu/kỳ cuối, hóa đơn hàng tháng và phản hồi yêu cầu gia hạn khi hợp đồng sắp hết hạn.'],
   ]
   return <section className="frame inner-page"><Link className="back" to="/"><ArrowLeft size={17} /> Khám phá</Link><h1>Hướng dẫn thuê căn hộ</h1><div className="guide-grid">
     {steps.map(([Icon, title, body]) => <article className="panel" key={title}><div className="step-icon"><Icon size={25} /></div><h2>{title}</h2><p>{body}</p></article>)}
@@ -203,28 +203,77 @@ export function Login() {
   </section>
 }
 
+const publicLeaseOptions = [
+  ['1M', '1 tháng (30/31 ngày; tháng 2 tính 30 ngày)', 'MONTH', 1],
+  ['6M', '6 tháng (theo chuẩn chu kỳ tháng)', 'MONTH', 6],
+  ['1Y', '1 năm (12 tháng)', 'YEAR', 1],
+  ['CUSTOM', 'Tùy chọn thời gian thuê', 'CUSTOM', 1],
+]
+
 export function ApartmentDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { db, actor, favorites, toggleFavorite, save } = useDemo()
+  const { db, actor, favorites, toggleFavorite, save, apiConnected, refreshFromApi } = useDemo()
   const [request, setRequest] = useState(false)
+  const [termKey, setTermKey] = useState('6M')
+  const [startDate, setStartDate] = useState(() => dateAt(7))
+  const [endDate, setEndDate] = useState(() => calculateEndDateForTerm(dateAt(7), 'MONTH', 6))
   const [error, setError] = useState('')
   const unit = db.apartments.find((item) => item.id === id && item.published && unitStatus(db, item) === 'ready')
   if (!unit) return <section className="frame inner-page"><Empty title="Căn hộ này hiện không mở cho thuê"><Link className="button primary" to="/">Xem căn hộ khác</Link></Empty></section>
   const property = db.buildings.find((item) => item.id === unit.buildingId)
   const owner = identity(property.ownerId)
   const saved = favorites.includes(id)
+  const activeTerm = publicLeaseOptions.find(([key]) => key === termKey) ?? publicLeaseOptions[1]
+  const breakdown = calculateLeaseBreakdown(startDate, endDate, unit.price)
+  const firstPeriod = breakdown.periods[0]
+  const lastPeriod = breakdown.periods.at(-1)
+
+  function handleTermChange(nextKey) {
+    setTermKey(nextKey)
+    const found = publicLeaseOptions.find(([key]) => key === nextKey)
+    if (found && found[2] !== 'CUSTOM' && startDate) {
+      setEndDate(calculateEndDateForTerm(startDate, found[2], found[3]))
+    }
+  }
+
+  function handleStartChange(nextStart) {
+    setStartDate(nextStart)
+    const found = publicLeaseOptions.find(([key]) => key === termKey)
+    if (found && found[2] !== 'CUSTOM' && nextStart) {
+      setEndDate(calculateEndDateForTerm(nextStart, found[2], found[3]))
+    }
+  }
+
   function begin() {
     if (!actor) navigate('/dang-nhap', { state: { role: 'tenant', from: `/can-ho/${id}` } })
     else { setError(''); setRequest(true) }
   }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
     try {
-      const result = addContract(db, actor, unit, { startDate: form.get('startDate'), endDate: form.get('endDate'), rent: unit.price })
+      const result = addContract(db, actor, unit, {
+        startDate,
+        endDate,
+        rent: unit.price,
+        leaseTermUnit: activeTerm[2],
+        leaseTermValue: activeTerm[3],
+      })
+      let targetId = result.contract.id
+      if (apiConnected) {
+        const created = await backendApi.createContract({
+          apartmentId: unit.id,
+          startDate,
+          endDate,
+          rent: unit.price,
+          leaseTermUnit: activeTerm[2],
+          leaseTermValue: activeTerm[3],
+        })
+        if (created?.id) targetId = created.id
+        await refreshFromApi()
+      }
       save(result.db, 'Đã tạo hợp đồng chờ ký.')
-      navigate(`/tenant/hop-dong/${result.contract.id}`)
+      navigate(`/tenant/hop-dong/${targetId}`)
     } catch (problem) { setError(problem.message) }
   }
   return <section className="frame inner-page">
@@ -240,8 +289,18 @@ export function ApartmentDetail() {
     </div>
     {request && <Modal title="Yêu cầu thuê căn hộ" close={() => setRequest(false)}><form className="stack" onSubmit={submit}>
       <p>{unit.title} · {money(unit.price)}/tháng</p>
-      <div className="form-grid"><Field label="Ngày bắt đầu"><input name="startDate" type="date" min={dateAt()} defaultValue={dateAt(7)} required /></Field><Field label="Ngày kết thúc"><input name="endDate" type="date" min={dateAt()} defaultValue={plusDays(dateAt(7), 179)} required /></Field></div>
-      <Notice>Chọn thời hạn để tạo hợp đồng chờ ký. Bạn có thể đọc điều khoản và đặt lịch trong khu vực khách thuê.</Notice>
+      <Field label="Thời hạn muốn thuê"><Select value={termKey} onChange={(event) => handleTermChange(event.target.value)}>{publicLeaseOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></Field>
+      <div className="form-grid">
+        <Field label="Ngày bắt đầu (dọn vào)"><input name="startDate" type="date" min={dateAt()} value={startDate} onChange={(event) => handleStartChange(event.target.value)} required /></Field>
+        <Field label="Ngày kết thúc"><input name="endDate" type="date" min={startDate || dateAt()} value={endDate} onChange={(event) => { setTermKey('CUSTOM'); setEndDate(event.target.value) }} required /></Field>
+      </div>
+      {breakdown.totalPeriods > 0 && <dl className="facts">
+        <div><dt>Tiền đặt cọc (thu khi ký)</dt><dd>{money(unit.price)}</dd></div>
+        <div><dt>Tiền thuê kỳ đầu ({firstPeriod.daysInPeriod}/{firstPeriod.monthBasisDays} ngày)</dt><dd>{money(breakdown.firstPeriodRent)}</dd></div>
+        <div><dt>Tiền thuê kỳ cuối ({lastPeriod.daysInPeriod}/{lastPeriod.monthBasisDays} ngày)</dt><dd>{money(breakdown.lastPeriodRent)}</dd></div>
+        <div><dt>Hạn chót dọn vào (3 ngày)</dt><dd>{shortDate(plusDays(startDate, 3))}</dd></div>
+      </dl>}
+      <Notice>Chọn thời hạn để tạo hợp đồng chờ ký. Bạn có thể đọc điều khoản và đặt lịch ký trong khu vực khách thuê; người môi giới sẽ xác nhận ký và thu tiền cọc tại địa điểm hẹn.</Notice>
       {error && <Notice error>{error}</Notice>}<button className="button primary">Xem hợp đồng chờ ký <ArrowRight size={18} /></button>
     </form></Modal>}
   </section>
