@@ -35,10 +35,15 @@ export function DemoProvider({ children }) {
       let mergedFavorites = { ...db.favorites }
 
       if (publicData?.items) {
-        const publicById = new Map(publicData.items.map((item) => [item.id, {
-          ...item,
-          area: Number(item.area),
-        }]))
+        const existingUnitsById = new Map(mergedApartments.map((u) => [u.id, u]))
+        const publicById = new Map(publicData.items.map((item) => {
+          const prevUnit = existingUnitsById.get(item.id)
+          return [item.id, {
+            ...prevUnit,
+            ...item,
+            area: Number(item.area),
+          }]
+        }))
         mergedApartments = mergedApartments.map((unit) => publicById.get(unit.id) ?? unit)
         for (const item of publicData.items) {
           if (!mergedApartments.some((u) => u.id === item.id)) {
@@ -55,9 +60,14 @@ export function DemoProvider({ children }) {
             backendApi.listOwnerBuildings(),
             backendApi.listOwnerApartments(),
           ])
+          const existingBuildingsById = new Map(mergedBuildings.map((b) => [b.id, b]))
           const otherBuildings = mergedBuildings.filter((b) => b.ownerId !== currentActorId)
-          mergedBuildings = [...otherBuildings, ...ownerBuildings]
-          const ownerUnitById = new Map(ownerUnits.map((u) => [u.id, { ...u, area: Number(u.area) }]))
+          mergedBuildings = [
+            ...otherBuildings,
+            ...ownerBuildings.map((b) => ({ ...existingBuildingsById.get(b.id), ...b })),
+          ]
+          const existingUnitsById = new Map(mergedApartments.map((u) => [u.id, u]))
+          const ownerUnitById = new Map(ownerUnits.map((u) => [u.id, { ...existingUnitsById.get(u.id), ...u, area: Number(u.area) }]))
           mergedApartments = mergedApartments.map((u) => ownerUnitById.get(u.id) ?? u)
           for (const u of ownerUnits) {
             if (!mergedApartments.some((item) => item.id === u.id)) {
@@ -140,7 +150,7 @@ export function DemoProvider({ children }) {
   return <Context.Provider value={{
     db, actor, login, save, toggleFavorite,
     favorites: db.favorites[actor?.id ?? 'guest'] ?? [],
-    apiConnected, refreshFromBackend,
+    apiConnected, refreshFromBackend, refreshFromApi: refreshFromBackend,
   }}>
     {children}
     <div className="toast-region" role="status">{toast && <div className="toast"><Check size={19} />{toast}</div>}</div>

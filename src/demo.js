@@ -107,8 +107,6 @@ export function calculateLeaseBreakdown(startDate, endDate, monthlyRent) {
   }
 }
 
-const building = (id, ownerId, name, district, address) => ({
-  id, ownerId, name, district, address,
 const building = (id, ownerId, name, district, address, lat, lng) => ({
   id, ownerId, name, district, address, lat, lng,
   location: `Sảnh lễ tân ${name}, ${address}`,

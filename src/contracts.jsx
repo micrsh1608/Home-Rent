@@ -67,13 +67,10 @@ export function ContractDetail({ role }) {
   const deadline = moveInDeadline(contract)
   const breakdown = calculateLeaseBreakdown(contract.startDate, contract.endDate, contract.rent)
   const overdueNoShow = canCancelNoShow(contract)
-
-  async function act(action, values, message) {
-  const tenant = identity(contract.tenantId)
-  const owner = identity(contract.ownerId)
   const contractUnit = db.apartments.find((item) => item.id === contract.apartmentId)
   const contractBuilding = db.buildings.find((item) => item.id === contractUnit?.buildingId || item.name === contract.propertyName)
-  function act(action, values, message) {
+
+  async function act(action, values, message) {
     try {
       if (apiConnected) {
         if (action === 'schedule') await backendApi.scheduleContract(id, values.appointment)

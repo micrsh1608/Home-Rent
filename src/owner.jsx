@@ -65,8 +65,6 @@ export function OwnerProperties() {
   const [addressDraft, setAddressDraft] = useState('')
   const [unitBuildingId, setUnitBuildingId] = useState('')
   const [error, setError] = useState('')
-  const open = (value) => { setError(''); setEditor(value) }
-  async function submit(event) {
   const open = (value) => {
     setError('')
     if (value?.type === 'building') {
@@ -83,7 +81,7 @@ export function OwnerProperties() {
     }
     setEditor(value)
   }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const text = (key) => String(data.get(key) || '').trim()
@@ -91,12 +89,14 @@ export function OwnerProperties() {
       if (editor.type === 'building') {
         const name = text('name'), address = text('address'), district = text('district')
         if (!name || !address || !district) throw new Error('Điền tên, khu vực và địa chỉ tòa nhà.')
+        const lat = Number(data.get('lat')), lng = Number(data.get('lng'))
         const property = {
           id: editor.item?.id ?? crypto.randomUUID(),
           ownerId: actor.id,
           name,
           address,
           district,
+          ...(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : {}),
           location: text('location') || `Sảnh lễ tân ${name}, ${address}`,
           electricRate: Number(data.get('electricRate')),
           waterRate: Number(data.get('waterRate')),
@@ -106,15 +106,12 @@ export function OwnerProperties() {
           else await backendApi.createBuilding(property)
           await refreshFromApi()
         }
-        const lat = Number(data.get('lat')), lng = Number(data.get('lng'))
-        const property = { id: editor.item?.id ?? crypto.randomUUID(), ownerId: actor.id, name, address, district,
-          ...(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : {}),
-          location: text('location') || `Sảnh lễ tân ${name}, ${address}`, electricRate: Number(data.get('electricRate')), waterRate: Number(data.get('waterRate')) }
         save({ ...db, buildings: editor.item ? db.buildings.map((item) => item.id === property.id ? property : item) : [...db.buildings, property] }, 'Đã lưu tòa nhà.')
       } else {
         const buildingId = text('buildingId'), room = text('room'), title = text('title')
         if (!room || !title || !buildings.some((item) => item.id === buildingId)) throw new Error('Điền mã phòng, tên và tòa nhà.')
         if (units.some((item) => item.id !== editor.item?.id && item.buildingId === buildingId && item.room.toLowerCase() === room.toLowerCase())) throw new Error('Mã căn hộ đã tồn tại trong tòa nhà.')
+        const lat = Number(data.get('lat')), lng = Number(data.get('lng'))
         const unit = {
           image: 'greenhouse',
           published: false,
@@ -124,16 +121,13 @@ export function OwnerProperties() {
           buildingId,
           room,
           title,
+          ...(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : {}),
           price: Number(data.get('price')),
           area: Number(data.get('area')),
           beds: Number(data.get('beds')),
           baths: Number(data.get('baths')),
           condition: text('condition'),
         }
-        const lat = Number(data.get('lat')), lng = Number(data.get('lng'))
-        const unit = { image: 'greenhouse', published: false, description: '', ...editor.item, id: editor.item?.id ?? crypto.randomUUID(), buildingId, room, title,
-          ...(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : {}),
-          price: Number(data.get('price')), area: Number(data.get('area')), beds: Number(data.get('beds')), baths: Number(data.get('baths')), condition: text('condition') }
         if (unit.condition === 'maintenance' && db.contracts.some((item) => item.apartmentId === unit.id && item.status === 'signed' && !expired(item))) throw new Error('Căn hộ có hợp đồng còn hiệu lực.')
         if (apiConnected) {
           if (editor.item) await backendApi.updateApartment(unit.id, unit)
