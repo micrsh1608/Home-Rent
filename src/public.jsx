@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowDown, ArrowLeft, ArrowRight, Bath, BedDouble, Building2, CalendarDays, ChevronDown, Columns2, FileCheck2, Heart, KeyRound, LayoutGrid, Map as MapIcon, MapPin, Maximize, Search, SlidersHorizontal, UserRound } from 'lucide-react'
-import { addContract, backendApi, calculateEndDateForTerm, calculateLeaseBreakdown, dateAt, identity, money, people, plusDays, shortDate, unitImage, unitStatus } from './demo'
+import { addContract, dateAt, identity, money, people, plusDays, unitImage, unitStatus } from './demo'
 import { Empty, Field, Modal, Notice, Select, Status, useDemo } from './shared'
 import { BudgetFilter, DistrictFilter, formatBudget } from './SearchFilters'
 import { ExploreMap, NeighborhoodMap } from './MapView'

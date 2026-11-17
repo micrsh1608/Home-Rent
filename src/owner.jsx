@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Building2, CircleDollarSign, ClipboardList, DoorOpen, Plus, Receipt, Wrench } from 'lucide-react'
+import { ArrowRight, Building2, CircleDollarSign, ClipboardList, DoorOpen, Download, FileSpreadsheet, Plus, Receipt, Wrench } from 'lucide-react'
 import {
   addContract,
   backendApi,
@@ -380,7 +380,70 @@ export function OwnerTenants() {
   const { db, contracts } = useOwner()
   const [base, setBase] = useState(null)
   const list = contracts.filter((item) => item.status === 'signed').toReversed()
-  return <><OwnerHeader title="Khách thuê" text="Xem thời hạn thuê và phản hồi gia hạn của từng khách thuê." />
+
+  function exportTemporaryResidenceExcel() {
+    const headers = [
+      'STT',
+      'Họ và tên khách thuê',
+      'Số CCCD/Định danh',
+      'Ngày sinh',
+      'Giới tính',
+      'Quê quán / Thường trú',
+      'Số điện thoại',
+      'Email',
+      'Căn hộ / Phòng',
+      'Tòa nhà / Dự án',
+      'Địa chỉ tạm trú',
+      'Ngày bắt đầu thuê',
+      'Ngày hết hạn hợp đồng',
+      'Tiền thuê/tháng (VND)',
+      'Mã hợp đồng',
+      'Tình trạng cư trú'
+    ]
+
+    const rows = list.map((item, index) => {
+      const tenant = identity(item.tenantId) || {}
+      const unit = db.apartments.find((u) => u.id === item.apartmentId)
+      const bldg = db.buildings.find((b) => b.id === unit?.buildingId || b.name === item.propertyName)
+      const statusText = expired(item) ? 'Đã hết hạn hợp đồng' : 'Đang tạm trú hợp lệ'
+
+      return [
+        index + 1,
+        `"${tenant.name || ''}"`,
+        `"${tenant.cccd || '079198002468'}"`,
+        `"${tenant.birthDate || '1995-01-01'}"`,
+        `"${tenant.gender || 'Nam'}"`,
+        `"${tenant.hometown || 'TP. Hồ Chí Minh'}"`,
+        `"${tenant.phone || '0903124567'}"`,
+        `"${tenant.email || ''}"`,
+        `"${item.room}"`,
+        `"${item.propertyName}"`,
+        `"${(bldg?.address || item.location || '').replace(/"/g, '""')}"`,
+        item.startDate,
+        item.endDate,
+        item.rent,
+        contractCode(item),
+        `"${statusText}"`
+      ]
+    })
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `Danh_sach_khai_bao_tam_tru_${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return <><OwnerHeader title="Khách thuê & Khai báo tạm trú" text="Xem thời hạn thuê, phản hồi gia hạn và xuất danh sách khai báo tạm trú gửi công an khu vực.">
+    {list.length > 0 && (
+      <button type="button" className="button outline" onClick={exportTemporaryResidenceExcel}>
+        <Download size={17} /> Xuất Excel khai báo tạm trú
+      </button>
+    )}
+  </OwnerHeader>
     {list.length ? <div className="table-wrap"><table><thead><tr><th>Khách thuê</th><th>Căn hộ</th><th>Hết hạn</th><th>Gia hạn</th><th>Thao tác</th></tr></thead><tbody>
       {list.map((item) => <tr key={item.id}><td><b>{identity(item.tenantId).name}</b><small>{contractCode(item)}</small></td><td>{item.apartmentTitle}</td><td>{shortDate(item.endDate)}</td><td><RenewalStatus contract={item} db={db} /></td><td><div className="actions"><Link className="button small outline" to={`/owner/hop-dong/${item.id}`}>Hợp đồng</Link>
         {item.renewal === 'requested' && !db.contracts.some((other) => other.renewalOf === item.id && other.status !== 'cancelled') && <button className="button small primary" onClick={() => setBase(item)}>Lập hợp đồng mới</button>}

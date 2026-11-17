@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRight, Bell, CalendarDays, FileText, MapPin, Receipt, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Bell, CalendarDays, FileText, MapPin, Printer, Receipt, ShieldCheck } from 'lucide-react'
 import {
   appointmentText, backendApi, calculateLeaseBreakdown, canCancelNoShow,
   contractCode, dateAt, expired, identity, invoiceTotal, money,
@@ -8,6 +8,8 @@ import {
 } from './demo'
 import { Empty, Field, Modal, Notice, Status, useDemo } from './shared'
 import { AppointmentMiniMap } from './MapView'
+import { LegalContractModal } from './LegalContractModal'
+import { InvoiceReceiptModal } from './InvoiceReceiptModal'
 
 export function ContractStatus({ contract }) {
   if (contract.status === 'cancelled') return <Status tone="amber">Đã hủy (Mất cọc)</Status>
@@ -55,6 +57,7 @@ export function ContractDetail({ role }) {
   const [error, setError] = useState('')
   const [signedAtLocation, setSignedAtLocation] = useState(false)
   const [depositReceived, setDepositReceived] = useState(false)
+  const [showLegal, setShowLegal] = useState(false)
   const contract = db.contracts.find((item) => item.id === id && (role === 'tenant' ? item.tenantId : item.ownerId) === actor.id)
   const back = role === 'tenant' ? '/tenant' : '/owner/hop-dong'
   if (!contract) return <Empty title="Không tìm thấy hợp đồng"><Link className="button outline" to={back}>Về danh sách</Link></Empty>
@@ -109,7 +112,18 @@ export function ContractDetail({ role }) {
 
   return <>
     <Link className="back" to={back}><ArrowLeft size={17} /> Danh sách hợp đồng</Link>
-    <div className="page-head"><div><h1>{contract.apartmentTitle}</h1><p>{contractCode(contract)} · Căn {contract.room}</p></div><ContractStatus contract={contract} /></div>
+    <div className="page-head">
+      <div>
+        <h1>{contract.apartmentTitle}</h1>
+        <p>{contractCode(contract)} · Căn {contract.room}</p>
+      </div>
+      <div className="actions">
+        <button type="button" className="button outline" onClick={() => setShowLegal(true)}>
+          <FileText size={17} /> Xuất Hợp đồng PDF (Mẫu chuẩn)
+        </button>
+        <ContractStatus contract={contract} />
+      </div>
+    </div>
     {isCancelled && <Notice error><AlertTriangle size={17} /> {contract.cancellationReason || `Hợp đồng đã bị hủy do khách không dọn vào trong 3 ngày kể từ ngày quy định (${shortDate(contract.startDate)}). Khách hàng mất khoản tiền đặt cọc ${money(contract.deposit)}.`}</Notice>}
     {role === 'tenant' && renewalOpen(contract) && !contract.renewal && <div className="renewal-banner"><Bell size={22} /><div><b>{expired(contract) ? 'Hợp đồng đã hết hạn' : 'Hợp đồng sắp hết hạn'}</b><p>Bạn có muốn tiếp tục thuê sau ngày {shortDate(contract.endDate)}?</p></div><div className="actions"><button className="button outline" onClick={() => open('declined')}>Không gia hạn</button><button className="button primary" onClick={() => open('requested')}>Muốn gia hạn</button></div></div>}
     <div className="contract-detail-grid">
@@ -255,22 +269,53 @@ export function ContractDetail({ role }) {
     <Field label="Ngày trả phòng thực tế"><input type="date" name="actualMoveOut" max={dateAt()} defaultValue={contract.actualMoveOut} /></Field>
     <Notice>Lưu ý: Khách hàng phải nhận phòng không muộn hơn 3 ngày kể từ ngày dọn vào trên hợp đồng ({shortDate(deadline)}).</Notice>
     {error && <Notice error>{error}</Notice>}<button className="button primary">Lưu bàn giao</button></form></Modal>}
+
+    {showLegal && (
+      <LegalContractModal
+        contract={contract}
+        building={contractBuilding}
+        unit={contractUnit}
+        tenant={tenant}
+        owner={owner}
+        breakdown={breakdown}
+        deadline={deadline}
+        close={() => setShowLegal(false)}
+      />
+    )}
   </>
 }
 
 export function InvoiceDetail({ invoice, contract, close }) {
+  const [showReceipt, setShowReceipt] = useState(false)
   const penalty = invoice.kind === 'early-move-in'
-  return <Modal title={penalty ? 'Hóa đơn phạt nhận phòng sớm' : `Hóa đơn tháng ${invoice.month.split('-').reverse().join('/')}`} close={close}>
-    <div className="stack"><p>{contract.apartmentTitle} · {contractCode(contract)}</p>
-      <dl className="facts">
-        {!penalty && invoice.periodStart && invoice.periodEnd && <div><dt>Chu kỳ tính tiền</dt><dd>{shortDate(invoice.periodStart)} – {shortDate(invoice.periodEnd)} ({invoice.daysInPeriod}/{invoice.monthBasisDays} ngày)</dd></div>}
-        {!penalty && <><div><dt>Chỉ số điện (kWh)</dt><dd>{invoice.oldElectric} → {invoice.newElectric}</dd></div><div><dt>Chỉ số nước (m³)</dt><dd>{invoice.oldWater} → {invoice.newWater}</dd></div></>}
-        {invoice.lines.map((line) => <div key={line.title}><dt>{line.title}</dt><dd>{money(line.amount)}</dd></div>)}
-        <div><dt>Tổng cộng</dt><dd><strong>{money(invoiceTotal(invoice))}</strong></dd></div>
-        <div><dt>Thanh toán</dt><dd><PaymentStatus paid={invoice.status === 'paid'} /></dd></div>
-      </dl>
-    </div>
-  </Modal>
+  return <>
+    <Modal title={penalty ? 'Hóa đơn phạt nhận phòng sớm' : `Hóa đơn tháng ${invoice.month.split('-').reverse().join('/')}`} close={close}>
+      <div className="stack">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <p>{contract.apartmentTitle} · {contractCode(contract)}</p>
+          <button type="button" className="button outline small" onClick={() => setShowReceipt(true)}>
+            <Printer size={15} /> In Phiếu thu (PDF)
+          </button>
+        </div>
+        <dl className="facts">
+          {!penalty && invoice.periodStart && invoice.periodEnd && <div><dt>Chu kỳ tính tiền</dt><dd>{shortDate(invoice.periodStart)} – {shortDate(invoice.periodEnd)} ({invoice.daysInPeriod}/{invoice.monthBasisDays} ngày)</dd></div>}
+          {!penalty && <><div><dt>Chỉ số điện (kWh)</dt><dd>{invoice.oldElectric} → {invoice.newElectric}</dd></div><div><dt>Chỉ số nước (m³)</dt><dd>{invoice.oldWater} → {invoice.newWater}</dd></div></>}
+          {invoice.lines.map((line) => <div key={line.title}><dt>{line.title}</dt><dd>{money(line.amount)}</dd></div>)}
+          <div><dt>Tổng cộng</dt><dd><strong>{money(invoiceTotal(invoice))}</strong></dd></div>
+          <div><dt>Thanh toán</dt><dd><PaymentStatus paid={invoice.status === 'paid'} /></dd></div>
+        </dl>
+      </div>
+    </Modal>
+    {showReceipt && (
+      <InvoiceReceiptModal
+        invoice={invoice}
+        contract={contract}
+        owner={identity(contract.ownerId)}
+        tenant={identity(contract.tenantId)}
+        close={() => setShowReceipt(false)}
+      />
+    )}
+  </>
 }
 
 export function Invoices({ role }) {

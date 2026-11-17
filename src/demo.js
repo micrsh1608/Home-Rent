@@ -1,8 +1,8 @@
 export const people = [
-  { id: 't1', name: 'Nguyễn Minh Anh', role: 'tenant', email: 'minhanh@ancu.vn' },
-  { id: 't2', name: 'Lê Hoàng Nam', role: 'tenant', email: 'hoangnam@ancu.vn' },
-  { id: 'o1', name: 'Trần Thu Hà', role: 'owner', email: 'thuha@ancu.vn' },
-  { id: 'o2', name: 'Phạm Gia Bảo', role: 'owner', email: 'giabao@ancu.vn' },
+  { id: 't1', name: 'Nguyễn Minh Anh', role: 'tenant', email: 'minhanh@ancu.vn', cccd: '079198002468', phone: '0903124567', birthDate: '1998-05-14', gender: 'Nữ', hometown: 'Đà Nẵng' },
+  { id: 't2', name: 'Lê Hoàng Nam', role: 'tenant', email: 'hoangnam@ancu.vn', cccd: '079195009876', phone: '0918765432', birthDate: '1995-11-20', gender: 'Nam', hometown: 'Hà Nội' },
+  { id: 'o1', name: 'Trần Thu Hà', role: 'owner', email: 'thuha@ancu.vn', cccd: '079185001234', phone: '0988665544', birthDate: '1985-08-19', gender: 'Nữ', hometown: 'TP. Hồ Chí Minh' },
+  { id: 'o2', name: 'Phạm Gia Bảo', role: 'owner', email: 'giabao@ancu.vn', cccd: '079188005678', phone: '0977334455', birthDate: '1988-02-10', gender: 'Nam', hometown: 'Cần Thơ' },
 ]
 
 export function dateAt(offset = 0) {
@@ -154,7 +154,7 @@ export function makeContract(db, apartmentId, tenantId, startDate, endDate, rent
 }
 
 function seed() {
-  const db = { buildings, apartments, contracts: [], invoices: [], favorites: {} }
+  const db = { buildings, apartments, contracts: [], invoices: [], favorites: {}, auditLogs: [] }
   db.contracts = [
     {
       ...makeContract(db, 'a5', 't1', dateAt(-160), dateAt(8), 11200000),
@@ -174,14 +174,108 @@ function seed() {
     oldElectric: 661, newElectric: 785, oldWater: 37, newWater: 41,
     lines: [{ title: 'Tiền thuê', amount: 11200000 }, { title: 'Tiền điện (124 kWh)', amount: 434000 }, { title: 'Tiền nước (4 m³)', amount: 80000 }],
   }]
+  db.auditLogs = [
+    {
+      id: 'log-101',
+      timestamp: `${dateAt(-161)} 09:30:15`,
+      actorId: 'o1',
+      actorName: 'Trần Thu Hà',
+      role: 'owner',
+      action: 'SIGN_CONTRACT',
+      entityType: 'CONTRACT',
+      entityId: 'HD-1001',
+      summary: 'Xác nhận khách ký hợp đồng tại The River Thảo Điền & đã thu cọc 11.200.000 ₫',
+      ipAddress: '118.69.182.45',
+      device: 'Desktop Chrome / Windows 11',
+    },
+    {
+      id: 'log-102',
+      timestamp: `${dateAt(-160)} 08:15:00`,
+      actorId: 'o1',
+      actorName: 'Trần Thu Hà',
+      role: 'owner',
+      action: 'RECORD_HANDOVER',
+      entityType: 'CONTRACT',
+      entityId: 'HD-1001',
+      summary: 'Ghi nhận bàn giao nhận phòng thực tế cho khách Nguyễn Minh Anh',
+      ipAddress: '118.69.182.45',
+      device: 'Mobile Safari / iOS 18',
+    },
+    {
+      id: 'log-103',
+      timestamp: `${dateAt(-31)} 10:00:22`,
+      actorId: 'o1',
+      actorName: 'Trần Thu Hà',
+      role: 'owner',
+      action: 'CREATE_INVOICE',
+      entityType: 'INVOICE',
+      entityId: 'HĐ-1001',
+      summary: 'Chốt chỉ số điện nước & lập hóa đơn tháng tiền nhà 11.714.000 ₫',
+      ipAddress: '118.69.182.45',
+      device: 'Desktop Chrome / Windows 11',
+    },
+    {
+      id: 'log-104',
+      timestamp: `${dateAt(-192)} 14:20:10`,
+      actorId: 'o2',
+      actorName: 'Phạm Gia Bảo',
+      role: 'owner',
+      action: 'SIGN_CONTRACT',
+      entityType: 'CONTRACT',
+      entityId: 'HD-1002',
+      summary: 'Xác nhận khách ký hợp đồng tại Lumière Residence & thu cọc 10.400.000 ₫',
+      ipAddress: '14.161.22.89',
+      device: 'Edge / Windows 11',
+    },
+    {
+      id: 'log-105',
+      timestamp: `${dateAt(-9)} 16:45:00`,
+      actorId: 't2',
+      actorName: 'Lê Hoàng Nam',
+      role: 'tenant',
+      action: 'RENEWAL_RESPONSE',
+      entityType: 'CONTRACT',
+      entityId: 'HD-1002',
+      summary: 'Khách thuê gửi phản hồi: Không gia hạn hợp đồng sau ngày hết hạn',
+      ipAddress: '113.161.78.12',
+      device: 'Chrome / Android 14',
+    },
+  ]
   return db
+}
+
+export function recordAuditLog(db, actor, action, entityType, entityId, summary, details = {}) {
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  const newLog = {
+    id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp,
+    actorId: actor?.id ?? 'system',
+    actorName: actor?.name ?? 'Hệ thống tự động',
+    role: actor?.role ?? 'system',
+    action,
+    entityType,
+    entityId,
+    summary,
+    ipAddress: '127.0.0.1 (Localhost / Secure VPN)',
+    device: typeof navigator !== 'undefined' && /Mobile/i.test(navigator.userAgent) ? 'Mobile WebApp' : 'Desktop Browser (Chrome/Vite)',
+    ...details,
+  }
+  return {
+    ...db,
+    auditLogs: [newLog, ...(db.auditLogs || [])],
+  }
 }
 
 export const storageKey = 'an-cu-demo-v2'
 export function loadDemo() {
   try {
     const saved = globalThis.localStorage?.getItem(storageKey)
-    if (saved) return JSON.parse(saved)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      return { ...seed(), ...parsed, auditLogs: parsed.auditLogs || seed().auditLogs }
+    }
   } catch {
     // A browser with storage disabled can still run the demo in memory.
   }
@@ -310,7 +404,19 @@ export function updateContract(db, actor, id, action, payload = {}, today = date
   const apartments = (action === 'sign' || action === 'confirm-sign-and-deposit')
     ? db.apartments.map((item) => item.id === contract.apartmentId ? { ...item, published: false } : item)
     : db.apartments
-  return { ...db, apartments, invoices, contracts: db.contracts.map((item) => item.id === id ? { ...item, ...changes } : item) }
+  let nextDb = { ...db, apartments, invoices, contracts: db.contracts.map((item) => item.id === id ? { ...item, ...changes } : item) }
+  const actionMap = {
+    schedule: ['SCHEDULE_APPOINTMENT', `Cập nhật lịch hẹn ký: ${appointmentText(payload.appointment)}`],
+    sign: ['SIGN_CONTRACT', `Xác nhận khách ký hợp đồng tại ${contract.location}`],
+    'confirm-sign-and-deposit': ['SIGN_CONTRACT', `Xác nhận khách ký hợp đồng tại ${contract.location} & đã thu cọc ${money(contract.deposit)}`],
+    'cancel-no-show': ['CANCEL_CONTRACT', `Hủy hợp đồng do quá 3 ngày không dọn vào & giữ cọc ${money(contract.deposit)}`],
+    renewal: ['RENEWAL_RESPONSE', `Khách chọn: ${payload.choice === 'requested' ? 'Muốn gia hạn' : 'Không gia hạn'}`],
+    handover: ['RECORD_HANDOVER', `Ghi nhận bàn giao: nhận phòng ${shortDate(payload.actualMoveIn) || '—'}, trả phòng ${shortDate(payload.actualMoveOut) || '—'}`],
+  }
+  if (actionMap[action]) {
+    nextDb = recordAuditLog(nextDb, actor, actionMap[action][0], 'CONTRACT', contractCode(contract), actionMap[action][1])
+  }
+  return nextDb
 }
 
 function occupiedDates(contract) {
@@ -349,7 +455,15 @@ export function addContract(db, actor, unit, terms) {
     leaseTermUnit,
     leaseTermValue,
   })
-  return { db: { ...db, contracts: [...db.contracts, contract] }, contract }
+  const nextDb = recordAuditLog(
+    { ...db, contracts: [...db.contracts, contract] },
+    actor,
+    'CREATE_CONTRACT',
+    'CONTRACT',
+    contractCode(contract),
+    `Tạo hợp đồng thuê mới căn ${unit.room} (${unit.title}) thời hạn ${shortDate(startDate)} – ${shortDate(endDate)}`,
+  )
+  return { db: nextDb, contract }
 }
 
 export function billForMonth(db, actor, contract, month, values) {
@@ -373,24 +487,26 @@ export function billForMonth(db, actor, contract, month, values) {
     { title: `Tiền điện (${newElectric - oldElectric} kWh)`, amount: (newElectric - oldElectric) * contract.electricRate },
     { title: `Tiền nước (${newWater - oldWater} m³)`, amount: (newWater - oldWater) * contract.waterRate },
   ]
-  return {
-    ...db,
-    invoices: [
-      ...db.invoices,
-      {
-        id: globalThis.crypto.randomUUID(),
-        contractId: contract.id,
-        month,
-        periodStart: matchedPeriod?.periodStart ?? contract.startDate,
-        periodEnd: matchedPeriod?.periodEnd ?? contract.endDate,
-        daysInPeriod: matchedPeriod?.daysInPeriod ?? 30,
-        monthBasisDays: matchedPeriod?.monthBasisDays ?? 30,
-        ...values,
-        lines,
-        status: 'unpaid',
-      },
-    ],
+  const newInvoice = {
+    id: globalThis.crypto.randomUUID(),
+    contractId: contract.id,
+    month,
+    periodStart: matchedPeriod?.periodStart ?? contract.startDate,
+    periodEnd: matchedPeriod?.periodEnd ?? contract.endDate,
+    daysInPeriod: matchedPeriod?.daysInPeriod ?? 30,
+    monthBasisDays: matchedPeriod?.monthBasisDays ?? 30,
+    ...values,
+    lines,
+    status: 'unpaid',
   }
+  return recordAuditLog(
+    { ...db, invoices: [...db.invoices, newInvoice] },
+    actor,
+    'CREATE_INVOICE',
+    'INVOICE',
+    `HĐ-${newInvoice.month}`,
+    `Lập hóa đơn tháng ${newInvoice.month} cho căn ${contract.room}: ${money(invoiceTotal(newInvoice))}`,
+  )
 }
 
 export const invoiceTotal = (invoice) => invoice.lines.reduce((sum, line) => sum + line.amount, 0)

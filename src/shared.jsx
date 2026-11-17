@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Bell, Building2, Check, ChevronDown, CircleHelp, FileText, Heart, House, LayoutDashboard, LogOut, Menu, Newspaper, Receipt, Users, X } from 'lucide-react'
+import { ArrowLeft, Bell, Building2, Check, ChevronDown, CircleHelp, FileText, Heart, House, LayoutDashboard, LogOut, Menu, Moon, Newspaper, Receipt, ShieldCheck, Sun, Users, X } from 'lucide-react'
 import { backendApi, dateAt, identity, loadDemo, renewalOpen, storageKey } from './demo'
 
 const Context = createContext(null)
@@ -11,7 +11,29 @@ export function DemoProvider({ children }) {
   const [actorId, setActorId] = useState(() => sessionStorage.getItem('an-cu-actor'))
   const [toast, setToast] = useState('')
   const [apiConnected, setApiConnected] = useState(false)
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('an-cu-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    } catch {
+      return 'light'
+    }
+  })
   const actor = identity(actorId)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try {
+      localStorage.setItem('an-cu-theme', theme)
+    } catch { /* ignore */ }
+    const metaTheme = document.querySelector('meta[name="theme-color"]')
+    if (metaTheme) {
+      metaTheme.setAttribute('content', theme === 'dark' ? '#0f1412' : '#f8f7f3')
+    }
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+  }
 
   useEffect(() => {
     try { localStorage.setItem(storageKey, JSON.stringify(db)) } catch { /* Keep the in-memory session. */ }
@@ -151,6 +173,7 @@ export function DemoProvider({ children }) {
     db, actor, login, save, toggleFavorite,
     favorites: db.favorites[actor?.id ?? 'guest'] ?? [],
     apiConnected, refreshFromBackend, refreshFromApi: refreshFromBackend,
+    theme, toggleTheme,
   }}>
     {children}
     <div className="toast-region" role="status">{toast && <div className="toast"><Check size={19} />{toast}</div>}</div>
@@ -226,6 +249,22 @@ export function Logo() {
   </Link>
 }
 
+export function ThemeToggle({ className = '' }) {
+  const { theme, toggleTheme } = useDemo()
+  const isDark = theme === 'dark'
+  return (
+    <button
+      type="button"
+      className={`icon-btn theme-toggle ${className}`}
+      onClick={toggleTheme}
+      title={isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối (Dark mode)'}
+      aria-label={isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối (Dark mode)'}
+    >
+      {isDark ? <Sun size={20} /> : <Moon size={20} />}
+    </button>
+  )
+}
+
 export function PublicLayout() {
   const { actor, favorites } = useDemo()
   const [menu, setMenu] = useState(false)
@@ -240,6 +279,7 @@ export function PublicLayout() {
           <NavLink to="/huong-dan">Hướng dẫn thuê</NavLink>
         </nav>
         <div className="header-actions">
+          <ThemeToggle />
           <NavLink to="/da-luu" className="icon-btn saved-link" aria-label="Căn hộ đã lưu"><Heart size={20} />{favorites.length > 0 && <span className="count">{favorites.length}</span>}</NavLink>
           <Link className="button primary header-login" to={actor ? `/${actor.role}` : '/dang-nhap'}>{actor ? (actor.role === 'owner' ? 'Trang chủ nhà' : 'Hợp đồng của tôi') : 'Đăng nhập'}</Link>
           <button type="button" className="icon-btn mobile-menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
@@ -266,6 +306,7 @@ export function RoleLayout({ role }) {
     ['/owner/hop-dong', 'Hợp đồng', FileText],
     ['/owner/khach-thue', 'Khách thuê', Users],
     ['/owner/hoa-don', 'Hóa đơn', Receipt],
+    ['/owner/kiem-toan-rbac', 'Kiểm toán & RBAC', ShieldCheck],
   ] : [
     ['/tenant', 'Hợp đồng của tôi', FileText],
     ['/tenant/hoa-don', 'Hóa đơn', Receipt],
@@ -281,6 +322,7 @@ export function RoleLayout({ role }) {
       <header className="workspace-header">
         <div className="workspace-user">
           <span className="demo-label">{apiConnected ? 'Đã kết nối Backend API' : 'Bản demo'}</span>
+          <ThemeToggle />
           <Link className="icon-btn bell" aria-label={`${count} thông báo cần xem`} to={role === 'owner' ? '/owner/khach-thue' : '/tenant'}><Bell size={21} />{count > 0 && <span className="count">{count}</span>}</Link>
           <span className="avatar">{actor.name.split(' ').at(-1).slice(0, 1)}</span><b>{actor.name}</b>
           <button className="icon-btn" title="Đăng xuất" aria-label="Đăng xuất" onClick={() => { flushSync(() => navigate('/', { replace: true })); login(null) }}><LogOut size={18} /></button>
