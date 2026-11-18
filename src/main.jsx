@@ -4,6 +4,7 @@ import { HashRouter, Link, Route, Routes } from 'react-router-dom'
 import { ApartmentDetail, Guide, Home, Login, Saved } from './public'
 import { ContractDetail, TenantContracts, TenantInvoices } from './contracts'
 import { OwnerBilling, OwnerContracts, OwnerDashboard, OwnerListings, OwnerProperties, OwnerTenants } from './owner'
+import { AuditRbac } from './AuditRbac'
 import { DemoProvider, Empty, PublicLayout, RoleLayout, ScrollToTop } from './shared'
 import './styles.css'
 
@@ -30,6 +31,7 @@ createRoot(document.getElementById('root')).render(
       <Route path="hop-dong/:id" element={<ContractDetail role="owner" />} />
       <Route path="khach-thue" element={<OwnerTenants />} />
       <Route path="hoa-don" element={<OwnerBilling />} />
+      <Route path="kiem-toan-rbac" element={<AuditRbac />} />
     </Route>
   </Routes></DemoProvider></HashRouter></React.StrictMode>,
 )

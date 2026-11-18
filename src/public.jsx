@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ArrowDown, ArrowLeft, ArrowRight, Bath, BedDouble, Building2, CalendarDays, ChevronDown, FileCheck2, Heart, KeyRound, MapPin, Maximize, Search, SlidersHorizontal, UserRound } from 'lucide-react'
-import { addContract, backendApi, calculateEndDateForTerm, calculateLeaseBreakdown, dateAt, identity, money, people, plusDays, shortDate, unitImage, unitStatus } from './demo'
+import { ArrowDown, ArrowLeft, ArrowRight, Bath, BedDouble, Building2, CalendarDays, ChevronDown, Columns2, FileCheck2, Heart, KeyRound, LayoutGrid, Map as MapIcon, MapPin, Maximize, Search, SlidersHorizontal, UserRound } from 'lucide-react'
+import { addContract, dateAt, identity, money, people, plusDays, unitImage, unitStatus } from './demo'
 import { Empty, Field, Modal, Notice, Select, Status, useDemo } from './shared'
 import { BudgetFilter, DistrictFilter, formatBudget } from './SearchFilters'
+import { ExploreMap, NeighborhoodMap } from './MapView'
 
 const defaults = { districts: [], minPrice: 0, maxPrice: null, beds: '', query: '', area: '' }
 const bedroomOptions = [['', 'Bất kỳ'], ...[1, 2, 3].map((count) => [String(count), `${count} phòng ngủ`])]
 const normalize = (text) => text.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/đ/g, 'd')
 
-function ApartmentCard({ unit }) {
+function ApartmentCard({ unit, active = false, onHover }) {
   const { db, favorites, toggleFavorite } = useDemo()
   const property = db.buildings.find((item) => item.id === unit.buildingId)
   const saved = favorites.includes(unit.id)
-  return <article className="apartment-card">
+  return <article
+    className={`apartment-card ${active ? 'is-map-active' : ''}`}
+    onMouseEnter={() => onHover?.(unit.id)}
+    onMouseLeave={() => onHover?.(null)}
+  >
     <div className="card-image">
       <Link to={`/can-ho/${unit.id}`} aria-label={unit.title}><img src={unitImage(unit)} alt={`Phòng khách của ${unit.title}`} /></Link>
       <Status tone="green">Còn trống</Status>
@@ -32,18 +37,20 @@ function ArrowUpRight() {
   return <ArrowRight className="tilt" size={19} />
 }
 
-function Results({ units }) {
-  return units.length ? <div className="apartment-grid">{units.map((unit) => <ApartmentCard unit={unit} key={unit.id} />)}</div> :
+function Results({ units, activeUnitId, onHoverUnit }) {
+  return units.length ? <div className="apartment-grid">{units.map((unit) => <ApartmentCard unit={unit} key={unit.id} active={activeUnitId === unit.id} onHover={onHoverUnit} />)}</div> :
     <Empty title="Chưa tìm thấy căn hộ"><p>Thử thay đổi khu vực hoặc khoảng giá.</p></Empty>
 }
 
 export function Home() {
-  const { db } = useDemo()
+  const { db, favorites, toggleFavorite } = useDemo()
   const [draft, setDraft] = useState(defaults)
   const [filters, setFilters] = useState(defaults)
   const [sort, setSort] = useState('featured')
   const [advanced, setAdvanced] = useState(false)
   const [openFilter, setOpenFilter] = useState(null)
+  const [viewMode, setViewMode] = useState('split')
+  const [hoveredUnitId, setHoveredUnitId] = useState(null)
   const options = useRef(null)
   useEffect(() => {
     if (openFilter) {
@@ -151,14 +158,64 @@ export function Home() {
     </section>
     <section id="can-ho" className="frame results">
       <div className="section-title">
-        <div><h2>{filtered ? 'Kết quả tìm kiếm' : 'Căn hộ nổi bật'}</h2><p aria-live="polite">{results.length} căn hộ đang cho thuê</p></div>
+        <div><h2>{filtered ? 'Kết quả tìm kiếm' : 'Căn hộ nổi bật'}</h2><p aria-live="polite">{results.length} căn hộ đang cho thuê tại TP. Hồ Chí Minh</p></div>
         <div className="list-tools">
           {filtered && <button className="button ghost" onClick={() => { setDraft(defaults); setFilters(defaults); setOpenFilter(null) }}>Bỏ bộ lọc</button>}
+          <div className="view-mode-switch" role="group" aria-label="Chế độ hiển thị">
+            <button type="button" className={viewMode === 'grid' ? 'active' : ''} onClick={() => setViewMode('grid')} title="Chỉ xem danh sách"><LayoutGrid size={15} /> Danh sách</button>
+            <button type="button" className={viewMode === 'split' ? 'active' : ''} onClick={() => setViewMode('split')} title="Danh sách kết hợp Bản đồ"><Columns2 size={15} /> Chia đôi</button>
+            <button type="button" className={viewMode === 'map' ? 'active' : ''} onClick={() => setViewMode('map')} title="Bản đồ toàn màn hình"><MapIcon size={15} /> Bản đồ</button>
+          </div>
           <button className={`button outline ${advanced ? 'selected' : ''}`} aria-expanded={advanced} onClick={() => { setAdvanced(!advanced); if (!advanced) setTimeout(() => document.querySelector('.advanced input')?.focus(), 0) }}><SlidersHorizontal size={16} /> Lọc thêm</button>
           <Select aria-label="Sắp xếp căn hộ" value={sort} onChange={(event) => setSort(event.target.value)}><option value="featured">Nổi bật</option><option value="ascending">Giá thấp trước</option><option value="descending">Giá cao trước</option><option value="area">Diện tích lớn trước</option></Select>
         </div>
       </div>
-      <Results units={results} />
+      {viewMode === 'grid' && <Results units={results} activeUnitId={hoveredUnitId} onHoverUnit={setHoveredUnitId} />}
+      {viewMode === 'split' && (
+        <div className="results-split-layout">
+          <div className="results-split-list">
+            <Results units={results} activeUnitId={hoveredUnitId} onHoverUnit={setHoveredUnitId} />
+          </div>
+          <aside className="results-split-map">
+            <ExploreMap
+              units={results}
+              buildingsById={buildingsById}
+              activeUnitId={hoveredUnitId}
+              onHoverUnit={setHoveredUnitId}
+              favorites={favorites}
+              onToggleFavorite={toggleFavorite}
+              selectedDistricts={filters.districts}
+              onSelectDistrict={(district) => {
+                const next = filters.districts.includes(district)
+                  ? filters.districts.filter((d) => d !== district)
+                  : [...filters.districts, district]
+                setDraft((prev) => ({ ...prev, districts: next }))
+                setFilters((prev) => ({ ...prev, districts: next }))
+              }}
+            />
+          </aside>
+        </div>
+      )}
+      {viewMode === 'map' && (
+        <div className="results-full-map">
+          <ExploreMap
+            units={results}
+            buildingsById={buildingsById}
+            activeUnitId={hoveredUnitId}
+            onHoverUnit={setHoveredUnitId}
+            favorites={favorites}
+            onToggleFavorite={toggleFavorite}
+            selectedDistricts={filters.districts}
+            onSelectDistrict={(district) => {
+              const next = filters.districts.includes(district)
+                ? filters.districts.filter((d) => d !== district)
+                : [...filters.districts, district]
+              setDraft((prev) => ({ ...prev, districts: next }))
+              setFilters((prev) => ({ ...prev, districts: next }))
+            }}
+          />
+        </div>
+      )}
     </section>
   </>
 }
@@ -280,7 +337,11 @@ export function ApartmentDetail() {
     <Link className="back" to="/"><ArrowLeft size={17} /> Tất cả căn hộ</Link>
     <h1>{unit.title}</h1><p className="detail-address"><MapPin size={18} /> {property.address}</p>
     <div className="detail-grid">
-      <div><img className="detail-image" src={unitImage(unit)} alt={unit.title} /><article className="panel description"><h2>Thông tin căn hộ</h2><p>{unit.description}</p><div className="features"><span><BedDouble /> {unit.beds} phòng ngủ</span><span><Bath /> {unit.baths} phòng tắm</span><span><Maximize /> {unit.area} m²</span></div></article></div>
+      <div>
+        <img className="detail-image" src={unitImage(unit)} alt={unit.title} />
+        <article className="panel description"><h2>Thông tin căn hộ</h2><p>{unit.description}</p><div className="features"><span><BedDouble /> {unit.beds} phòng ngủ</span><span><Bath /> {unit.baths} phòng tắm</span><span><Maximize /> {unit.area} m²</span></div></article>
+        <NeighborhoodMap building={property} unit={unit} />
+      </div>
       <aside className="panel booking"><Status tone="green">Còn trống</Status><div className="booking-price"><strong>{money(unit.price)}</strong><span> / tháng</span></div>
         <dl className="facts"><div><dt>Chủ nhà</dt><dd>{owner.name}</dd></div><div><dt>Mã căn hộ</dt><dd>{unit.room}</dd></div><div><dt>Tiền điện</dt><dd>{money(property.electricRate)}/kWh</dd></div><div><dt>Tiền nước</dt><dd>{money(property.waterRate)}/m³</dd></div></dl>
         {actor?.role !== 'owner' && <button className="button primary" onClick={begin}>Yêu cầu thuê <ArrowRight size={17} /></button>}

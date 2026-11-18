@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Bell, Building2, Check, ChevronDown, CircleHelp, FileText, Heart, House, LayoutDashboard, LogOut, Menu, Newspaper, Receipt, Users, X } from 'lucide-react'
+import { ArrowLeft, Bell, Building2, Check, ChevronDown, CircleHelp, FileText, Heart, House, LayoutDashboard, LogOut, Menu, Moon, Newspaper, Receipt, ShieldCheck, Sun, Users, X } from 'lucide-react'
 import { backendApi, dateAt, identity, loadDemo, renewalOpen, storageKey } from './demo'
 
 const Context = createContext(null)
@@ -11,7 +11,29 @@ export function DemoProvider({ children }) {
   const [actorId, setActorId] = useState(() => sessionStorage.getItem('an-cu-actor'))
   const [toast, setToast] = useState('')
   const [apiConnected, setApiConnected] = useState(false)
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('an-cu-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    } catch {
+      return 'light'
+    }
+  })
   const actor = identity(actorId)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try {
+      localStorage.setItem('an-cu-theme', theme)
+    } catch { /* ignore */ }
+    const metaTheme = document.querySelector('meta[name="theme-color"]')
+    if (metaTheme) {
+      metaTheme.setAttribute('content', theme === 'dark' ? '#0f1412' : '#f8f7f3')
+    }
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+  }
 
   useEffect(() => {
     try { localStorage.setItem(storageKey, JSON.stringify(db)) } catch { /* Keep the in-memory session. */ }
@@ -35,10 +57,15 @@ export function DemoProvider({ children }) {
       let mergedFavorites = { ...db.favorites }
 
       if (publicData?.items) {
-        const publicById = new Map(publicData.items.map((item) => [item.id, {
-          ...item,
-          area: Number(item.area),
-        }]))
+        const existingUnitsById = new Map(mergedApartments.map((u) => [u.id, u]))
+        const publicById = new Map(publicData.items.map((item) => {
+          const prevUnit = existingUnitsById.get(item.id)
+          return [item.id, {
+            ...prevUnit,
+            ...item,
+            area: Number(item.area),
+          }]
+        }))
         mergedApartments = mergedApartments.map((unit) => publicById.get(unit.id) ?? unit)
         for (const item of publicData.items) {
           if (!mergedApartments.some((u) => u.id === item.id)) {
@@ -55,9 +82,14 @@ export function DemoProvider({ children }) {
             backendApi.listOwnerBuildings(),
             backendApi.listOwnerApartments(),
           ])
+          const existingBuildingsById = new Map(mergedBuildings.map((b) => [b.id, b]))
           const otherBuildings = mergedBuildings.filter((b) => b.ownerId !== currentActorId)
-          mergedBuildings = [...otherBuildings, ...ownerBuildings]
-          const ownerUnitById = new Map(ownerUnits.map((u) => [u.id, { ...u, area: Number(u.area) }]))
+          mergedBuildings = [
+            ...otherBuildings,
+            ...ownerBuildings.map((b) => ({ ...existingBuildingsById.get(b.id), ...b })),
+          ]
+          const existingUnitsById = new Map(mergedApartments.map((u) => [u.id, u]))
+          const ownerUnitById = new Map(ownerUnits.map((u) => [u.id, { ...existingUnitsById.get(u.id), ...u, area: Number(u.area) }]))
           mergedApartments = mergedApartments.map((u) => ownerUnitById.get(u.id) ?? u)
           for (const u of ownerUnits) {
             if (!mergedApartments.some((item) => item.id === u.id)) {
@@ -140,7 +172,8 @@ export function DemoProvider({ children }) {
   return <Context.Provider value={{
     db, actor, login, save, toggleFavorite,
     favorites: db.favorites[actor?.id ?? 'guest'] ?? [],
-    apiConnected, refreshFromBackend,
+    apiConnected, refreshFromBackend, refreshFromApi: refreshFromBackend,
+    theme, toggleTheme,
   }}>
     {children}
     <div className="toast-region" role="status">{toast && <div className="toast"><Check size={19} />{toast}</div>}</div>
@@ -156,9 +189,80 @@ export function ScrollToTop() {
 }
 
 export function Logo() {
-  return <Link to="/" className="logo" aria-label="An Cư – trang chủ">
-    <span className="logo-mark"><House size={21} strokeWidth={1.65} /></span><span>An Cư<span className="logo-dot">.</span></span>
+  return <Link to="/" className="logo" aria-label="An Cư – trang chủ" title="An Cư">
+    <span className="logo-mark" aria-hidden="true">
+      <svg className="logo-svg" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="ancu-bg" x1="4" y1="2" x2="40" y2="42" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#2d5647" />
+            <stop offset="100%" stopColor="#193329" />
+          </linearGradient>
+          <linearGradient id="ancu-gold" x1="14" y1="14" x2="30" y2="36" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#f0d5a8" />
+            <stop offset="100%" stopColor="#b58652" />
+          </linearGradient>
+        </defs>
+        {/* Outer Sanctuary Badge */}
+        <rect x="1.5" y="1.5" width="41" height="41" rx="12.5" fill="url(#ancu-bg)" stroke="#ead3a9" strokeOpacity="0.28" strokeWidth="1.2" />
+        {/* Subtle Architectural Halo */}
+        <circle cx="22" cy="21" r="14.5" stroke="#ead3a9" strokeOpacity="0.12" strokeWidth="1" />
+        {/* Left High-Rise Wing & Sanctuary Roof Apex (Letter A silhouette - "Cư") */}
+        <path
+          d="M9.5 33.5V18.2L22 7.5L26.2 11.1V15.4L22 11.8L14.2 18.5V33.5H9.5Z"
+          fill="#fffef7"
+        />
+        {/* Right Stepped Urban Tower Wing (3D depth & modern apartment skyline) */}
+        <path
+          d="M22 7.5L34.5 18.2V33.5H29.8V18.5L22 11.8V7.5Z"
+          fill="#dce7dc"
+        />
+        {/* Secondary Modern Tower Accent */}
+        <path
+          d="M31.2 13.2H34.5V33.5H31.2V13.2Z"
+          fill="#fffef7"
+          fillOpacity="0.88"
+        />
+        {/* Sanctuary Archway Portal (Warmth & Peace - "An") */}
+        <path
+          d="M16.2 33.5V23.2C16.2 20.05 18.8 17.5 22 17.5C25.2 17.5 27.8 20.05 27.8 23.2V33.5"
+          stroke="url(#ancu-gold)"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
+        {/* Inner Arch Warm Glow */}
+        <path
+          d="M18.3 33.5V23.4C18.3 21.35 19.95 19.7 22 19.7C24.05 19.7 25.7 21.35 25.7 23.4V33.5H18.3Z"
+          fill="url(#ancu-gold)"
+          fillOpacity="0.18"
+        />
+        {/* Warm Hearth / Lit Window Orb at Heart of the Arch */}
+        <circle cx="22" cy="23.6" r="2.55" fill="url(#ancu-gold)" />
+        {/* Grounded Architectural Plinth ("An cư lạc nghiệp") */}
+        <path
+          d="M7.5 33.8H36.5"
+          stroke="url(#ancu-gold)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    </span>
   </Link>
+}
+
+export function ThemeToggle({ className = '' }) {
+  const { theme, toggleTheme } = useDemo()
+  const isDark = theme === 'dark'
+  return (
+    <button
+      type="button"
+      className={`icon-btn theme-toggle ${className}`}
+      onClick={toggleTheme}
+      title={isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối (Dark mode)'}
+      aria-label={isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối (Dark mode)'}
+    >
+      {isDark ? <Sun size={20} /> : <Moon size={20} />}
+    </button>
+  )
 }
 
 export function PublicLayout() {
@@ -175,6 +279,7 @@ export function PublicLayout() {
           <NavLink to="/huong-dan">Hướng dẫn thuê</NavLink>
         </nav>
         <div className="header-actions">
+          <ThemeToggle />
           <NavLink to="/da-luu" className="icon-btn saved-link" aria-label="Căn hộ đã lưu"><Heart size={20} />{favorites.length > 0 && <span className="count">{favorites.length}</span>}</NavLink>
           <Link className="button primary header-login" to={actor ? `/${actor.role}` : '/dang-nhap'}>{actor ? (actor.role === 'owner' ? 'Trang chủ nhà' : 'Hợp đồng của tôi') : 'Đăng nhập'}</Link>
           <button type="button" className="icon-btn mobile-menu" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
@@ -201,6 +306,7 @@ export function RoleLayout({ role }) {
     ['/owner/hop-dong', 'Hợp đồng', FileText],
     ['/owner/khach-thue', 'Khách thuê', Users],
     ['/owner/hoa-don', 'Hóa đơn', Receipt],
+    ['/owner/kiem-toan-rbac', 'Kiểm toán & RBAC', ShieldCheck],
   ] : [
     ['/tenant', 'Hợp đồng của tôi', FileText],
     ['/tenant/hoa-don', 'Hóa đơn', Receipt],
@@ -216,6 +322,7 @@ export function RoleLayout({ role }) {
       <header className="workspace-header">
         <div className="workspace-user">
           <span className="demo-label">{apiConnected ? 'Đã kết nối Backend API' : 'Bản demo'}</span>
+          <ThemeToggle />
           <Link className="icon-btn bell" aria-label={`${count} thông báo cần xem`} to={role === 'owner' ? '/owner/khach-thue' : '/tenant'}><Bell size={21} />{count > 0 && <span className="count">{count}</span>}</Link>
           <span className="avatar">{actor.name.split(' ').at(-1).slice(0, 1)}</span><b>{actor.name}</b>
           <button className="icon-btn" title="Đăng xuất" aria-label="Đăng xuất" onClick={() => { flushSync(() => navigate('/', { replace: true })); login(null) }}><LogOut size={18} /></button>
