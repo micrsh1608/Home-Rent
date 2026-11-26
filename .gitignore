@@ -1,3 +1,41 @@
+<<<<<<< Updated upstream
 node_modules/
 dist/
 .npm-cache/
+=======
+# Dependencies & Package Managers
+node_modules/
+.npm-cache/
+
+# Frontend Build Artifacts
+dist/
+apartment-rental-frontend/dist/
+apartment-rental-backend/src/main/resources/static/
+
+# Backend Build Artifacts (Maven / Java)
+target/
+apartment-rental-backend/target/
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+
+# IDE & OS Files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs & Temporary Files
+*.log
+npm-debug.log*
+
+# Local credentials
+.env
+.env.*
+!.env.example
+smtp.local.ps1
+smtp.local.properties
+>>>>>>> Stashed changes

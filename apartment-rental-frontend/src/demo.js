@@ -1,0 +1,628 @@
+export const IS_PROTOTYPE_MODE = import.meta.env?.VITE_APP_MODE === 'prototype'
+
+export const people = [
+  { id: 't1', name: 'Nguyễn Minh Anh', role: 'tenant', email: 'minhanh@ancu.vn' },
+  { id: 't2', name: 'Lê Hoàng Nam', role: 'tenant', email: 'hoangnam@ancu.vn' },
+  { id: 'o1', name: 'Trần Thu Hà', role: 'owner', email: 'thuha@ancu.vn' },
+  { id: 'o2', name: 'Phạm Gia Bảo', role: 'owner', email: 'giabao@ancu.vn' },
+]
+
+export function dateAt(offset = 0) {
+  const date = new Date()
+  date.setDate(date.getDate() + offset)
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(date)
+}
+
+export const plusDays = (iso, days) => {
+  const date = new Date(`${iso}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+export const daysBetweenInclusive = (startIso, endIso) => {
+  const start = new Date(`${startIso}T12:00:00Z`)
+  const end = new Date(`${endIso}T12:00:00Z`)
+  return Math.round((end - start) / 86400000) + 1
+}
+
+/**
+ * Quyết định 2:
+ * 1 tháng là tùy theo tháng có 30 hay 31 ngày;
+ * riêng đối với tháng 2 vẫn tính theo 30 ngày kể từ ngày bắt đầu trên hợp đồng.
+ */
+export function monthBasisDays(monthNumber) {
+  const m = Number(monthNumber)
+  if ([1, 3, 5, 7, 8, 10, 12].includes(m)) return 31
+  if ([4, 6, 9, 11].includes(m)) return 30
+  if (m === 2) return 30
+  throw new Error(`Tháng không hợp lệ: ${monthNumber}`)
+}
+
+export function calculateEndDateForTerm(startDate, unit = 'MONTH', value = 1) {
+  if (!startDate || Number(value) <= 0) throw new Error('Kiểm tra lại ngày bắt đầu và thời hạn thuê.')
+  const normalizedUnit = String(unit || 'MONTH').toUpperCase()
+  const totalMonths = normalizedUnit === 'YEAR' ? Number(value) * 12 : Number(value)
+  let cursor = startDate
+  for (let i = 0; i < totalMonths; i += 1) {
+    const month = Number(cursor.slice(5, 7))
+    cursor = plusDays(cursor, monthBasisDays(month))
+  }
+  return plusDays(cursor, -1)
+}
+
+export function calculateLeaseBreakdown(startDate, endDate, monthlyRent) {
+  if (!startDate || !endDate || endDate < startDate || !Number.isFinite(monthlyRent) || monthlyRent <= 0) {
+    return {
+      startDate, endDate, monthlyRent: monthlyRent || 0,
+      totalPeriods: 0, firstPeriodRent: 0, lastPeriodRent: 0, totalContractRent: 0, periods: [],
+    }
+  }
+  const periods = []
+  let cursor = startDate
+  let index = 1
+  while (cursor <= endDate) {
+    const month = Number(cursor.slice(5, 7))
+    const basisDays = monthBasisDays(month)
+    const fullPeriodEnd = plusDays(cursor, basisDays - 1)
+    const billingMonth = cursor.slice(0, 7)
+    if (endDate >= fullPeriodEnd) {
+      periods.push({
+        periodIndex: index,
+        billingMonth,
+        periodStart: cursor,
+        periodEnd: fullPeriodEnd,
+        daysInPeriod: basisDays,
+        monthBasisDays: basisDays,
+        fullMonth: true,
+        rentAmount: monthlyRent,
+      })
+      cursor = plusDays(fullPeriodEnd, 1)
+    } else {
+      const actualDays = daysBetweenInclusive(cursor, endDate)
+      const proratedRent = Math.round((monthlyRent * actualDays) / basisDays)
+      periods.push({
+        periodIndex: index,
+        billingMonth,
+        periodStart: cursor,
+        periodEnd: endDate,
+        daysInPeriod: actualDays,
+        monthBasisDays: basisDays,
+        fullMonth: actualDays === basisDays,
+        rentAmount: proratedRent,
+      })
+      break
+    }
+    index += 1
+  }
+  const firstPeriodRent = periods[0]?.rentAmount ?? 0
+  const lastPeriodRent = periods.at(-1)?.rentAmount ?? 0
+  const totalContractRent = periods.reduce((sum, p) => sum + p.rentAmount, 0)
+  return {
+    startDate,
+    endDate,
+    monthlyRent,
+    totalPeriods: periods.length,
+    firstPeriodRent,
+    lastPeriodRent,
+    totalContractRent,
+    periods,
+  }
+}
+
+const building = (id, ownerId, name, district, address) => ({
+  id, ownerId, name, district, address,
+  location: `Sảnh lễ tân ${name}, ${address}`,
+  electricRate: 3500, waterRate: 20000,
+})
+
+const buildings = [
+  building('b1', 'o1', 'The River Thảo Điền', 'TP. Thủ Đức', '28 Nguyễn Văn Hưởng, TP. Hồ Chí Minh'),
+  building('b2', 'o2', 'Lumière Residence', 'Quận 7', '88 Nguyễn Đức Cảnh, TP. Hồ Chí Minh'),
+  building('b3', 'o1', 'Urban Nest', 'Bình Thạnh', '55 Nguyễn Hữu Cảnh, TP. Hồ Chí Minh'),
+  building('b4', 'o2', 'The Greenhouse', 'Quận 3', '46 Võ Văn Tần, TP. Hồ Chí Minh'),
+]
+
+const apartment = (id, buildingId, room, title, price, area, beds, baths, image, published = true) => ({
+  id, buildingId, room, title, price, area, beds, baths, image, published,
+  condition: 'ready',
+  description: 'Căn hộ đầy đủ nội thất, đón ánh sáng tự nhiên. Có bếp riêng, máy lạnh và khu vực giặt. Phù hợp cho khách thuê dài hạn.',
+})
+
+const apartments = [
+  apartment('a1', 'b1', 'A-12.06', 'Căn hộ The River Thảo Điền', 12500000, 62, 2, 2, 'river'),
+  apartment('a2', 'b2', 'B-08.02', 'Căn hộ Lumière Residence', 9800000, 45, 1, 1, 'lumiere'),
+  apartment('a3', 'b3', 'C-18.03', 'Căn hộ Urban Nest', 15200000, 78, 3, 2, 'urban'),
+  apartment('a4', 'b4', 'D-07.01', 'Căn hộ The Greenhouse', 7900000, 38, 1, 1, 'greenhouse'),
+  apartment('a5', 'b1', 'A-05.02', 'Căn hộ River Garden', 11200000, 56, 2, 1, 'greenhouse', false),
+  apartment('a6', 'b2', 'B-09.03', 'Căn hộ Lumière Park', 10400000, 52, 2, 1, 'urban', false),
+]
+
+export function makeContract(db, apartmentId, tenantId, startDate, endDate, rent, renewalOf = null, extra = {}) {
+  const unit = db.apartments.find((item) => item.id === apartmentId)
+  const property = db.buildings.find((item) => item.id === unit.buildingId)
+  return {
+    id: globalThis.crypto.randomUUID(), apartmentId, tenantId, ownerId: property.ownerId, renewalOf,
+    apartmentTitle: unit.title, room: unit.room, propertyName: property.name,
+    startDate, endDate, rent, deposit: rent,
+    depositReceivedAmount: null, depositVerificationStatus: 'not_applicable',
+    location: property.location,
+    electricRate: property.electricRate, waterRate: property.waterRate,
+    status: 'awaiting', payment: 'unpaid', appointment: '', signedAt: null,
+    signedConfirmedBy: null, paymentConfirmedBy: null,
+    moveInDeadline: plusDays(startDate, 3),
+    depositForfeited: false, cancelledAt: null, cancellationReason: '',
+    leaseTermUnit: extra.leaseTermUnit ?? 'CUSTOM',
+    leaseTermValue: extra.leaseTermValue ?? 6,
+    renewal: null, actualMoveIn: '', actualMoveOut: '',
+    handoverElectricReading: null, handoverWaterReading: null, handoverMeterStatus: 'not_recorded',
+  }
+}
+
+function seed() {
+  const db = { buildings, apartments, contracts: [], invoices: [], favorites: {} }
+  db.contracts = [
+    {
+      ...makeContract(db, 'a5', 't1', dateAt(-160), dateAt(8), 11200000),
+      id: 'HD-1001', status: 'signed', payment: 'paid',
+      depositVerificationStatus: 'legacy_unverified',
+      signedAt: dateAt(-161), signedConfirmedBy: 'o1', paymentConfirmedBy: 'o1',
+      actualMoveIn: dateAt(-160), handoverMeterStatus: 'legacy_unverified',
+    },
+    {
+      ...makeContract(db, 'a6', 't2', dateAt(-190), dateAt(-9), 10400000),
+      id: 'HD-1002', status: 'signed', payment: 'paid',
+      depositVerificationStatus: 'legacy_unverified',
+      signedAt: dateAt(-192), signedConfirmedBy: 'o2', paymentConfirmedBy: 'o2',
+      actualMoveIn: dateAt(-190), handoverMeterStatus: 'legacy_unverified', renewal: 'declined',
+    },
+  ]
+  db.invoices = [{
+    id: 'HĐ-1001', contractId: 'HD-1001', periodIndex: 5, month: dateAt(-31).slice(0, 7), status: 'unpaid',
+    oldElectric: 661, newElectric: 785, oldWater: 37, newWater: 41,
+    meterVerificationStatus: 'legacy_unverified',
+    lines: [{ title: 'Tiền thuê', amount: 11200000 }, { title: 'Tiền điện (124 kWh)', amount: 434000 }, { title: 'Tiền nước (4 m³)', amount: 80000 }],
+  }]
+  return db
+}
+
+export const storageKey = 'an-cu-demo-v2'
+export function loadDemo() {
+  try {
+    const saved = globalThis.localStorage?.getItem(storageKey)
+    if (saved) return JSON.parse(saved)
+  } catch {
+    // A browser with storage disabled can still run prototype mode in memory.
+  }
+  return seed()
+}
+
+export const money = (amount) => `${new Intl.NumberFormat('vi-VN').format(amount ?? 0)} ₫`
+export const shortDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('/') : '—'
+export const appointmentText = (value) => value ? `${String(value).slice(11, 16)}, ${shortDate(value)}` : 'Chưa đặt lịch'
+export const nowInVietnam = () => new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Ho_Chi_Minh', dateStyle: 'short', timeStyle: 'short',
+}).format(new Date()).replace(' ', 'T')
+export const identity = (id) => people.find((person) => person.id === id)
+export const contractCode = (contract) => contract.code || (contract.id.startsWith('HD-') ? contract.id : `HD-${contract.id.slice(0, 8).toUpperCase()}`)
+export const expired = (contract, today = dateAt()) => contract.status === 'signed' && contract.endDate < today
+export const renewalOpen = (contract, today = dateAt()) => contract.status === 'signed' && contract.endDate <= plusDays(today, 30)
+export const moveInDeadline = (contract) => contract.moveInDeadline || plusDays(contract.startDate, 3)
+export const canCancelNoShow = (contract, today = dateAt()) =>
+  contract.status === 'signed' && !contract.actualMoveIn && today > moveInDeadline(contract)
+export const overlaps = (a, b) => a.startDate <= b.endDate && b.startDate <= a.endDate
+
+export function unitStatus(db, unit, today = dateAt()) {
+  if (unit.condition === 'maintenance') return 'maintenance'
+  if (db.contracts.some((c) => c.apartmentId === unit.id && c.status === 'signed' && c.endDate >= today)) return 'occupied'
+  if (unit.unitStatus && ['ready', 'occupied', 'maintenance'].includes(unit.unitStatus)) return unit.unitStatus
+  return 'ready'
+}
+
+export function updateContract(db, actor, id, action, payload = {}, today = dateAt()) {
+  const contract = db.contracts.find((item) => item.id === id)
+  const authorized = actor && contract && (actor.role === 'tenant'
+    ? contract.tenantId === actor.id
+    : actor.role === 'owner' && contract.ownerId === actor.id)
+  if (!authorized) throw new Error('Bạn không có quyền thao tác với hợp đồng này.')
+
+  let changes
+  let invoices = db.invoices
+  switch (action) {
+    case 'schedule':
+      if ((actor.role !== 'tenant' && actor.role !== 'owner') || contract.status !== 'awaiting') throw new Error('Hợp đồng này không thể đổi lịch.')
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(payload.appointment) || payload.appointment <= (payload.now ?? nowInVietnam())) {
+        throw new Error('Chọn ngày giờ ký trong tương lai.')
+      }
+      changes = { appointment: payload.appointment }
+      break
+    case 'update-awaiting': {
+      if (contract.status !== 'awaiting') throw new Error('Chỉ có thể chỉnh sửa điều khoản khi hợp đồng đang ở trạng thái Chờ ký.')
+      const leaseTermUnit = payload.leaseTermUnit || contract.leaseTermUnit || 'CUSTOM'
+      const leaseTermValue = Number(payload.leaseTermValue || contract.leaseTermValue || 1)
+      const startDate = payload.startDate || contract.startDate
+      const endDate = payload.endDate || ((leaseTermUnit === 'MONTH' || leaseTermUnit === 'YEAR')
+        ? calculateEndDateForTerm(startDate, leaseTermUnit, leaseTermValue)
+        : contract.endDate)
+      if (!startDate || !endDate || startDate < today || endDate < startDate) {
+        throw new Error('Kiểm tra lại thời hạn hợp đồng.')
+      }
+      if (actor.role === 'tenant' && payload.rent !== undefined && Number(payload.rent) !== contract.rent) {
+        throw new Error('Khách thuê không có quyền thay đổi giá thuê trên hợp đồng.')
+      }
+      const nextRent = actor.role === 'owner' && Number(payload.rent) > 0 ? Number(payload.rent) : contract.rent
+      changes = {
+        startDate,
+        endDate,
+        leaseTermUnit,
+        leaseTermValue,
+        rent: nextRent,
+        deposit: nextRent,
+        moveInDeadline: plusDays(startDate, 3),
+      }
+      break
+    }
+    case 'cancel-awaiting': {
+      if (contract.status !== 'awaiting') throw new Error('Chỉ có thể hủy trực tiếp khi hợp đồng đang ở trạng thái Chờ ký.')
+      changes = {
+        status: 'cancelled',
+        depositForfeited: false,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: payload.reason?.trim() || 'Đã hủy hợp đồng chờ ký trước khi ký kết.',
+      }
+      break
+    }
+    case 'sign':
+    case 'confirm-sign-and-deposit': {
+      const confirmed = Boolean(payload.accepted || (payload.signedAtLocation && payload.depositReceived))
+      if (contract.status !== 'awaiting' || !contract.appointment || !confirmed) {
+        throw new Error('Người môi giới cần xác nhận khách đã ký tại địa điểm hẹn và đã thu khoản tiền đặt cọc trên hợp đồng.')
+      }
+      const receivedAmount = payload.receivedAmount
+      if (receivedAmount === null || receivedAmount === undefined || !Number.isFinite(Number(receivedAmount)) || Number(receivedAmount) < contract.deposit) {
+        throw new Error('Số tiền đặt cọc thực nhận phải hợp lệ và đủ mức tiền đặt cọc trên hợp đồng.')
+      }
+      if (contract.endDate < today) throw new Error('Thời hạn của hợp đồng này đã qua.')
+      if (db.contracts.some((other) => other.id !== id && other.apartmentId === contract.apartmentId && other.status === 'signed' && overlaps(occupiedDates(other), contract))) {
+        throw new Error('Căn hộ đã có hợp đồng đã ký trùng thời gian.')
+      }
+      if (db.apartments.find((unit) => unit.id === contract.apartmentId)?.condition === 'maintenance') throw new Error('Căn hộ đang bảo trì.')
+      const confirmerId = actor.role === 'owner' ? actor.id : contract.ownerId
+      changes = {
+        status: 'signed',
+        payment: 'paid',
+        depositReceivedAmount: Number(receivedAmount),
+        depositVerificationStatus: 'verified',
+        signedAt: new Date().toISOString(),
+        signedConfirmedBy: confirmerId,
+        paymentConfirmedBy: confirmerId,
+      }
+      break
+    }
+    case 'cancel-no-show': {
+      if (actor.role !== 'owner' || contract.status !== 'signed') {
+        throw new Error('Chỉ người môi giới / chủ nhà mới được hủy hợp đồng đã ký quá hạn nhận phòng.')
+      }
+      if (contract.actualMoveIn) {
+        throw new Error('Khách hàng đã nhận phòng thực tế, không thể hủy theo điều khoản quá hạn dọn vào.')
+      }
+      const deadline = moveInDeadline(contract)
+      if (today <= deadline) {
+        throw new Error(`Chưa hết thời hạn 3 ngày kể từ ngày dọn vào quy định trên hợp đồng (${shortDate(deadline)}).`)
+      }
+      changes = {
+        status: 'cancelled',
+        depositForfeited: true,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: `Khách hàng không dọn vào trong 3 ngày kể từ ngày quy định (${shortDate(contract.startDate)}); hợp đồng bị hủy và mất tiền đặt cọc.`,
+      }
+      break
+    }
+    case 'renewal':
+      if (actor.role !== 'tenant' || !renewalOpen(contract, today) || contract.renewal || !['requested', 'declined'].includes(payload.choice)) {
+        throw new Error('Hợp đồng này không thể cập nhật lựa chọn gia hạn.')
+      }
+      changes = { renewal: payload.choice }
+      break
+    case 'handover': {
+      if (actor.role !== 'owner' || contract.status !== 'signed') throw new Error('Chỉ ghi nhận bàn giao cho hợp đồng đã ký.')
+      const effectiveMoveIn = payload.actualMoveIn || contract.actualMoveIn || ''
+      const effectiveMoveOut = payload.actualMoveOut || contract.actualMoveOut || ''
+      if (effectiveMoveOut && !effectiveMoveIn) {
+        throw new Error('Cần ghi nhận ngày nhận phòng thực tế trước khi ghi nhận ngày trả phòng.')
+      }
+      if ((effectiveMoveIn && effectiveMoveIn > today) || (effectiveMoveOut && effectiveMoveOut > today)) {
+        throw new Error('Ngày bàn giao thực tế phải là hôm nay hoặc trước đó.')
+      }
+      if (effectiveMoveIn && effectiveMoveOut && effectiveMoveOut < effectiveMoveIn) {
+        throw new Error('Ngày trả phòng phải từ ngày nhận phòng trở đi.')
+      }
+      const deadline = moveInDeadline(contract)
+      if (effectiveMoveIn && effectiveMoveIn > deadline) {
+        throw new Error(`Khách dọn vào sau quá 3 ngày kể từ ngày quy định (${shortDate(contract.startDate)}); hợp đồng thuộc diện bị hủy và mất tiền cọc.`)
+      }
+      if (effectiveMoveIn && effectiveMoveIn < contract.startDate && db.contracts.some((other) =>
+        other.id !== id && other.apartmentId === contract.apartmentId && other.status === 'signed' &&
+        overlaps(occupiedDates(other), { startDate: effectiveMoveIn, endDate: plusDays(contract.startDate, -1) })
+      )) throw new Error('Ngày nhận phòng sớm trùng với hợp đồng khác.')
+      if (effectiveMoveIn !== contract.actualMoveIn) {
+        const penalty = invoices.find((bill) => bill.contractId === id && bill.kind === 'early-move-in')
+        if (penalty?.status === 'paid') throw new Error('Hóa đơn phạt đã được xác nhận thu tiền.')
+        invoices = invoices.filter((bill) => bill !== penalty)
+        if (effectiveMoveIn && effectiveMoveIn < contract.startDate) {
+          invoices.push({
+            id: penalty?.id ?? globalThis.crypto.randomUUID(), contractId: id, kind: 'early-move-in',
+            month: effectiveMoveIn.slice(0, 7), status: 'unpaid',
+            lines: [{ title: 'Phạt nhận phòng trước ngày thỏa thuận', amount: contract.rent }],
+          })
+        }
+      }
+      const initialElectric = payload.initialElectric ?? contract.handoverElectricReading
+      const initialWater = payload.initialWater ?? contract.handoverWaterReading
+      changes = {
+        actualMoveIn: effectiveMoveIn,
+        actualMoveOut: effectiveMoveOut,
+        handoverElectricReading: initialElectric,
+        handoverWaterReading: initialWater,
+        handoverMeterStatus: (initialElectric != null && initialWater != null) ? 'verified' : contract.handoverMeterStatus,
+      }
+      break
+    }
+    default:
+      throw new Error('Thao tác không hợp lệ.')
+  }
+  const apartments = (action === 'sign' || action === 'confirm-sign-and-deposit')
+    ? db.apartments.map((item) => item.id === contract.apartmentId ? { ...item, published: false } : item)
+    : db.apartments
+  return { ...db, apartments, invoices, contracts: db.contracts.map((item) => item.id === id ? { ...item, ...changes } : item) }
+}
+
+function occupiedDates(contract) {
+  return contract.actualMoveIn && contract.actualMoveIn < contract.startDate
+    ? { startDate: contract.actualMoveIn, endDate: contract.endDate }
+    : contract
+}
+
+export function addContract(db, actor, unit, terms) {
+  if (!actor || !unit || unit.condition === 'maintenance') throw new Error('Căn hộ không khả dụng để tạo hợp đồng.')
+  const property = db.buildings.find((item) => item.id === unit.buildingId)
+  const base = db.contracts.find((item) => item.id === terms.renewalOf)
+  if (actor.role === 'owner' ? property.ownerId !== actor.id : actor.role !== 'tenant' || !unit.published || unitStatus(db, unit) !== 'ready') {
+    throw new Error('Căn hộ không khả dụng để tạo hợp đồng.')
+  }
+  const leaseTermUnit = terms.leaseTermUnit || 'CUSTOM'
+  const leaseTermValue = Number(terms.leaseTermValue || 1)
+  const startDate = terms.startDate
+  const endDate = terms.endDate || ((leaseTermUnit === 'MONTH' || leaseTermUnit === 'YEAR')
+    ? calculateEndDateForTerm(startDate, leaseTermUnit, leaseTermValue)
+    : '')
+  const effectiveRent = actor.role === 'tenant' ? unit.price : terms.rent
+  if (actor.role === 'tenant' && terms.rent !== undefined && terms.rent !== unit.price) {
+    throw new Error('Khách thuê không được tự thay đổi giá thuê niêm yết của căn hộ.')
+  }
+  if (!startDate || !endDate || startDate < dateAt() || endDate < startDate || !Number.isSafeInteger(effectiveRent) || effectiveRent <= 0) {
+    throw new Error('Kiểm tra lại thời hạn và tiền thuê.')
+  }
+  const tenantId = actor.role === 'tenant' ? actor.id : terms.tenantId
+  if (identity(tenantId)?.role !== 'tenant') throw new Error('Chọn khách thuê.')
+  if (terms.renewalOf && (actor.role !== 'owner' || !base || base.apartmentId !== unit.id || base.tenantId !== tenantId ||
+    base.renewal !== 'requested' || startDate <= base.endDate || db.contracts.some((item) => item.renewalOf === base.id && item.status !== 'cancelled'))) {
+    throw new Error('Kiểm tra lại yêu cầu gia hạn và thời hạn của hợp đồng mới.')
+  }
+  const candidateDates = { startDate, endDate }
+  const conflict = db.contracts.some((item) => item.apartmentId === unit.id && item.status !== 'cancelled' && overlaps(occupiedDates(item), candidateDates) &&
+    (item.status === 'signed' || item.tenantId === tenantId))
+  if (conflict) throw new Error('Đã có hợp đồng hoặc yêu cầu của khách thuê này trùng thời gian.')
+  const contract = makeContract(db, unit.id, tenantId, startDate, endDate, effectiveRent, terms.renewalOf, {
+    leaseTermUnit,
+    leaseTermValue,
+  })
+  return { db: { ...db, contracts: [...db.contracts, contract] }, contract }
+}
+
+export function billForMonth(db, actor, contract, month, values) {
+  if (!contract || actor.role !== 'owner' || contract.ownerId !== actor.id || contract.status !== 'signed') throw new Error('Chọn hợp đồng đã ký của bạn.')
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('Chọn tháng lập hóa đơn.')
+  const breakdown = calculateLeaseBreakdown(contract.startDate, contract.endDate, contract.rent)
+  const matchedPeriod = breakdown.periods.find((p) => p.billingMonth === month)
+  if (!matchedPeriod) throw new Error('Tháng lập hóa đơn nằm ngoài thời hạn hợp đồng.')
+  if (db.invoices.some((item) => item.contractId === contract.id && item.kind !== 'early-move-in' && (item.periodIndex === matchedPeriod.periodIndex || item.month === month))) {
+    throw new Error('Hợp đồng đã có hóa đơn cho kỳ này.')
+  }
+  const { oldElectric, newElectric, oldWater, newWater } = values
+  if (![oldElectric, newElectric, oldWater, newWater].every((value) => Number.isSafeInteger(value) && value >= 0) ||
+    newElectric < oldElectric || newWater < oldWater) throw new Error('Chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ.')
+
+  const rentAmount = matchedPeriod.rentAmount
+  const rentTitle = !matchedPeriod.fullMonth
+    ? `Tiền thuê (${matchedPeriod.daysInPeriod}/${matchedPeriod.monthBasisDays} ngày)`
+    : 'Tiền thuê'
+
+  const lines = [
+    { title: rentTitle, amount: rentAmount },
+    { title: `Tiền điện (${newElectric - oldElectric} kWh)`, amount: (newElectric - oldElectric) * contract.electricRate },
+    { title: `Tiền nước (${newWater - oldWater} m³)`, amount: (newWater - oldWater) * contract.waterRate },
+  ]
+  return {
+    ...db,
+    invoices: [
+      ...db.invoices,
+      {
+        id: globalThis.crypto.randomUUID(),
+        contractId: contract.id,
+        periodIndex: matchedPeriod.periodIndex,
+        month: matchedPeriod.billingMonth,
+        periodStart: matchedPeriod.periodStart,
+        periodEnd: matchedPeriod.periodEnd,
+        daysInPeriod: matchedPeriod.daysInPeriod,
+        monthBasisDays: matchedPeriod.monthBasisDays,
+        ...values,
+        lines,
+        status: 'unpaid',
+      },
+    ],
+  }
+}
+
+export const invoiceTotal = (invoice) => invoice.lines.reduce((sum, line) => sum + line.amount, 0)
+export const unitImage = (unit) => unit.customImage || `/images/${unit.image}.webp`
+
+/**
+ * P1-14: Tách biệt Application Mode (mặc định) và Prototype Mode (bật tường minh qua VITE_APP_MODE=prototype).
+ * Trong Application Mode, mọi lỗi kết nối/409/500 đều báo lỗi thật, tuyệt đối không rơi về mô phỏng cục bộ.
+ */
+export async function runAppMutation({ prototypeMode = IS_PROTOTYPE_MODE, apiCall, prototypeCall }) {
+  if (prototypeMode) {
+    if (typeof prototypeCall !== 'function') {
+      throw new Error('Thao tác này không khả dụng trong chế độ Prototype.')
+    }
+    return prototypeCall()
+  }
+  return apiCall()
+}
+
+// ============================================================================
+// Kết nối trực tiếp tới Backend API (apartment-rental-backend) kèm bảo vệ CSRF
+// ============================================================================
+
+const API_BASE = import.meta.env?.VITE_API_BASE_URL || '/api'
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+let cachedCsrfToken = ''
+
+export function readCsrfCookie() {
+  if (typeof document === 'undefined' || !document.cookie) return ''
+  const match = document.cookie
+    .split('; ')
+    .find((entry) => entry.startsWith('XSRF-TOKEN='))
+  return match ? decodeURIComponent(match.slice('XSRF-TOKEN='.length)) : ''
+}
+
+export function getActiveCsrfToken() {
+  return readCsrfCookie() || cachedCsrfToken || ''
+}
+
+export function clearCachedCsrfToken() {
+  cachedCsrfToken = ''
+}
+
+export async function apiRequest(path, options = {}, fetchImpl = globalThis.fetch) {
+  const method = String(options.method || 'GET').toUpperCase()
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  }
+  if (MUTATING_METHODS.has(method)) {
+    const csrfToken = getActiveCsrfToken()
+    if (csrfToken && !headers['X-CSRF-Token'] && !headers['X-XSRF-TOKEN']) {
+      headers['X-CSRF-Token'] = csrfToken
+    }
+  }
+
+  let response
+  try {
+    response = await fetchImpl(`${API_BASE}${path}`, {
+      credentials: 'include',
+      ...options,
+      method,
+      headers,
+    })
+  } catch (networkCause) {
+    const error = new Error('Không thể kết nối tới máy chủ Backend Java. Thao tác chưa được thực hiện.')
+    error.isNetworkError = true
+    error.cause = networkCause
+    throw error
+  }
+
+  const headerToken = response.headers?.get?.('X-CSRF-Token')
+  if (headerToken) {
+    cachedCsrfToken = headerToken
+  }
+
+  if (!response.ok) {
+    let message = `Lỗi kết nối máy chủ (${response.status})`
+    let code = 'HTTP_ERROR'
+    try {
+      const err = await response.json()
+      if (err?.message) message = err.message
+      if (err?.code) code = err.code
+    } catch {
+      // Ignore non-JSON error body
+    }
+    const error = new Error(message)
+    error.status = response.status
+    error.code = code
+    throw error
+  }
+  if (response.status === 204) return null
+  return response.json()
+}
+
+export const backendApi = {
+  checkHealth: () => apiRequest('/health'),
+  getCsrfToken: () => apiRequest('/auth/csrf'),
+  login: (userIdOrEmail, password = 'AnCu@123') =>
+    apiRequest('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ userId: userIdOrEmail, email: userIdOrEmail, password }),
+    }),
+  logout: async () => {
+    const res = await apiRequest('/auth/logout', { method: 'POST' })
+    clearCachedCsrfToken()
+    return res
+  },
+  me: () => apiRequest('/auth/me'),
+  listAccounts: () => apiRequest('/auth/accounts'),
+  listContacts: () => apiRequest('/auth/contacts'),
+  requestRegistration: (body) => apiRequest('/auth/register/request-otp', { method: 'POST', body: JSON.stringify(body) }),
+  confirmRegistration: (body) => apiRequest('/auth/register/confirm', { method: 'POST', body: JSON.stringify(body) }),
+  getProfile: () => apiRequest('/auth/profile'),
+  updateProfile: (body) => apiRequest('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  requestPasswordChange: (body) => apiRequest('/auth/password/change/request-otp', { method: 'POST', body: JSON.stringify(body) }),
+  confirmPasswordChange: (body) => apiRequest('/auth/password/change/confirm', { method: 'POST', body: JSON.stringify(body) }),
+  requestPasswordReset: (body) => apiRequest('/auth/password/reset/request-otp', { method: 'POST', body: JSON.stringify(body) }),
+  confirmPasswordReset: (body) => apiRequest('/auth/password/reset/confirm', { method: 'POST', body: JSON.stringify(body) }),
+  listPublicApartments: (params = '') => apiRequest(`/public/apartments${params ? `?${params}` : ''}`),
+  getPublicApartment: (id) => apiRequest(`/public/apartments/${id}`),
+  getOwnerDashboard: () => apiRequest('/owner/dashboard'),
+  listOwnerBuildings: () => apiRequest('/owner/buildings'),
+  createBuilding: (body) => apiRequest('/owner/buildings', { method: 'POST', body: JSON.stringify(body) }),
+  updateBuilding: (id, body) => apiRequest(`/owner/buildings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  listOwnerApartments: () => apiRequest('/owner/apartments'),
+  createApartment: (body) => apiRequest('/owner/apartments', { method: 'POST', body: JSON.stringify(body) }),
+  updateApartment: (id, body) => apiRequest(`/owner/apartments/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updateListing: (id, body) => apiRequest(`/owner/apartments/${id}/listing`, { method: 'PATCH', body: JSON.stringify(body) }),
+  togglePublish: (id, published) =>
+    apiRequest(`/owner/apartments/${id}/publish`, { method: 'PATCH', body: JSON.stringify({ published }) }),
+  listContracts: () => apiRequest('/contracts'),
+  getContract: (id) => apiRequest(`/contracts/${id}`),
+  getContractHistory: (id) => apiRequest(`/contracts/${id}/history`),
+  getRentSchedule: (id) => apiRequest(`/contracts/${id}/rent-schedule`),
+  getNextInvoicePreview: (id) => apiRequest(`/contracts/${id}/next-invoice-preview`),
+  previewRentSchedule: (params) => apiRequest(`/contracts/rent-preview?${params}`),
+  listRenewalNotices: () => apiRequest('/contracts/renewal-notices'),
+  createContract: (body) => apiRequest('/contracts', { method: 'POST', body: JSON.stringify(body) }),
+  updateAwaitingContract: (id, body) =>
+    apiRequest(`/contracts/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  cancelAwaitingContract: (id, reason = '') =>
+    apiRequest(`/contracts/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  scheduleContract: (id, appointment) =>
+    apiRequest(`/contracts/${id}/schedule`, { method: 'POST', body: JSON.stringify({ appointment }) }),
+  confirmSignAndDeposit: (id, body) =>
+    apiRequest(`/contracts/${id}/confirm-sign-and-deposit`, { method: 'POST', body: JSON.stringify(body) }),
+  cancelNoShow: (id) =>
+    apiRequest(`/contracts/${id}/cancel-no-show`, { method: 'POST' }),
+  recordCheckIn: (id, body) =>
+    apiRequest(`/contracts/${id}/check-in`, { method: 'POST', body: JSON.stringify(body) }),
+  recordCheckOut: (id, body) =>
+    apiRequest(`/contracts/${id}/check-out`, { method: 'POST', body: JSON.stringify(body) }),
+  recordHandover: (id, body) =>
+    apiRequest(`/contracts/${id}/handover`, { method: 'POST', body: JSON.stringify(body) }),
+  respondRenewal: (id, choice) =>
+    apiRequest(`/contracts/${id}/renewal`, { method: 'POST', body: JSON.stringify({ choice }) }),
+  createInvoice: (contractId, body) =>
+    apiRequest(`/contracts/${contractId}/invoices`, { method: 'POST', body: JSON.stringify(body) }),
+  listInvoices: () => apiRequest('/invoices'),
+  confirmInvoicePaid: (id) => apiRequest(`/invoices/${id}/confirm-paid`, { method: 'POST' }),
+  listFavorites: () => apiRequest('/favorites'),
+  toggleFavorite: (apartmentId) => apiRequest(`/favorites/${apartmentId}/toggle`, { method: 'POST' }),
+}

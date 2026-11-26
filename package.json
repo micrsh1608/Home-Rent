@@ -1,4 +1,5 @@
 {
+<<<<<<< Updated upstream
   "name": "apartment-rental-frontend",
   "version": "1.0.0",
   "private": true,
@@ -6,4 +7,30 @@
   "scripts": {"dev": "vite --host 127.0.0.1", "build": "vite build", "preview": "vite preview --host 127.0.0.1", "test": "node --test"},
   "dependencies": {"lucide-react": "^0.511.0", "react": "^19.1.0", "react-dom": "^19.1.0", "react-router-dom": "^7.6.0"},
   "devDependencies": {"@vitejs/plugin-react": "^4.5.0", "vite": "^6.3.5"}
+=======
+  "name": "an-cu-apartment-rental",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hệ thống Quản lý & Cho thuê Căn hộ An Cư — Dự án Full-Stack (React 19 + Vite & Java 21 + Spring Boot 3 + Flyway + SQL Server)",
+  "scripts": {
+    "setup:email": "node scripts/setup-gmail.mjs",
+    "install:frontend": "npm --prefix apartment-rental-frontend ci",
+    "dev": "node scripts/fullstack.mjs dev",
+    "dev:sqlserver": "node scripts/fullstack.mjs dev --sqlserver",
+    "dev:frontend": "npm --prefix apartment-rental-frontend run dev",
+    "dev:backend": "mvn -f apartment-rental-backend/pom.xml spring-boot:run -Psqlserver",
+    "dev:backend:local": "mvn -f apartment-rental-backend/pom.xml spring-boot:run -Plocal",
+    "build": "node scripts/fullstack.mjs build",
+    "build:frontend": "npm --prefix apartment-rental-frontend run build",
+    "build:backend": "mvn -f apartment-rental-backend/pom.xml test-compile",
+    "start": "mvn -f apartment-rental-backend/pom.xml spring-boot:run -Psqlserver",
+    "start:local": "mvn -f apartment-rental-backend/pom.xml spring-boot:run -Plocal",
+    "test": "node scripts/fullstack.mjs test",
+    "test:frontend": "npm --prefix apartment-rental-frontend test",
+    "test:startup": "node --test scripts/dev-readiness.test.mjs",
+    "test:backend": "mvn -f apartment-rental-backend/pom.xml test",
+    "test:sqlserver": "mvn -f apartment-rental-backend/pom.xml test -Dtest=SqlServerVerificationIntegrationTest"
+  }
+>>>>>>> Stashed changes
 }
